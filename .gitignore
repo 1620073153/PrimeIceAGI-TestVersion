@@ -21,9 +21,21 @@ venv/
 Thumbs.db
 .DS_Store
 
-# Claude Code 本地配置（含 API key）
-.claude/
-config/
+# Claude Code 用户本地配置（根目录）
+/.claude/
+
+# agent_home: 忽略运行时产生的文件（含密钥）
+config/agent_home/.claude/settings.json
+config/agent_home/.claude/backups/
+config/agent_home/.claude/projects/
+config/agent_home/.claude/tasks/
+config/agent_home/.claude/telemetry/
+config/agent_home/.claude/.last-cleanup
+config/agent_home/.claude.json
+
+# 其他 config 运行时文件（含密钥）
+config/claude_agent_settings.json
+config/claude_home/
 
 # 调试截图
 *.png
