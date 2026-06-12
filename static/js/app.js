@@ -1,233 +1,234 @@
-/**
- * PrimeIceAGI — 主应用逻辑
- * App 命名空间 + EventBus + 核心测试流程
- */
 'use strict';
 
-/* ================================================================
-   App 命名空间 — 收束所有全局状态
-   ================================================================ */
 var App = {
   taskId: null,
   eventSource: null,
   allRounds: [],
   currentRound: 0,
   pollTimer: null,
-  singleDoneCount: 0,
-  generatingTimer: null,
-  generatingElapsed: 0,
+  elapsedTimer: null,
+  elapsedStart: 0,
+  trackCount: 0,
   THEME_KEY: 'primeiceagi-theme',
+  maxRounds: function () { return parseInt(document.getElementById('max_rounds').value) || 5; }
+};
 
-  maxRounds: function () {
-    return parseInt(document.getElementById('max_rounds').value) || 5;
+/* ── Logging ── */
+var Log = {
+  add: function (text, cls) {
+    var el = document.getElementById('log-stream');
+    var icons = { success: '&#10004;', error: '&#10008;', warn: '&#9888;', info: '&#9679;', phase: '&#9654;' };
+    var line = document.createElement('div');
+    line.className = 'log-line ' + (cls || '');
+    line.innerHTML = '<span class="log-icon">' + (icons[cls] || '&#183;') + '</span><span class="log-text">' + text + '</span>';
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+  },
+  clear: function () { document.getElementById('log-stream').innerHTML = ''; }
+};
+
+/* ── Track Lanes ── */
+var Tracks = {
+  init: function (count) {
+    App.trackCount = count;
+    var el = document.getElementById('track-lanes');
+    el.innerHTML = '';
+    for (var i = 0; i < count; i++) {
+      el.innerHTML += '<div class="track-lane" id="track-' + i + '">' +
+        '<span class="track-label">#' + (i + 1).toString().padStart(2, '0') + '</span>' +
+        '<div class="track-bar"><div class="track-bar-fill pending" id="track-bar-' + i + '" style="width:50%"></div></div>' +
+        '<span class="track-time" id="track-time-' + i + '">...</span>' +
+        '<span class="track-status waiting" id="track-status-' + i + '">等待</span></div>';
+    }
+  },
+  updateLabel: function (idx, label) {
+    var el = document.querySelector('#track-' + idx + ' .track-label');
+    if (el) el.textContent = label;
+  },
+  done: function (idx, status, latency) {
+    var bar = document.getElementById('track-bar-' + idx);
+    var time = document.getElementById('track-time-' + idx);
+    var stat = document.getElementById('track-status-' + idx);
+    if (!bar) return;
+    bar.style.width = '100%';
+    bar.className = 'track-bar-fill ' + status;
+    time.textContent = (latency / 1000).toFixed(1) + 's';
+    var labels = { bypassed: '绕过', blocked: '拒绝', guardrail: '护栏', false_positive: '假阳性' };
+    stat.textContent = labels[status] || status;
+    stat.className = 'track-status ' + status;
+  },
+  setJudging: function (idx) {
+    var stat = document.getElementById('track-status-' + idx);
+    if (stat) { stat.textContent = '裁判中'; stat.className = 'track-status judging'; }
   }
 };
 
-/* ================================================================
-   EventBus — SSE / 轮询封装
-   ================================================================ */
+/* ── Session Pool ── */
+var Sessions = {
+  update: function (sessions, killed) {
+    var pool = document.getElementById('session-pool');
+    if (!sessions || sessions.length === 0) { pool.style.display = 'none'; return; }
+    pool.style.display = 'flex';
+    var html = '<span class="session-pool-label">存活会话 [' + sessions.length + '/5]:</span>';
+    sessions.forEach(function (s) {
+      html += '<span class="session-chip">' + s.id + ' (' + s.turn_num + '轮)</span>';
+    });
+    if (killed && killed.length) {
+      killed.forEach(function (k) {
+        html += '<span class="session-chip dead">' + k + '</span>';
+      });
+    }
+    pool.innerHTML = html;
+  }
+};
+
+/* ── EventBus ── */
 var EventBus = {
   connect: function (taskId) {
     if (App.eventSource) App.eventSource.close();
     App.eventSource = new EventSource('/api/test/' + taskId + '/stream');
-    App.eventSource.onmessage = function (e) {
-      EventBus.handleEvent(JSON.parse(e.data));
-    };
-    App.eventSource.onerror = function () {
-      if (!App.taskId) App.eventSource.close();
-    };
+    App.eventSource.onmessage = function (e) { EventBus.handleEvent(JSON.parse(e.data)); };
+    App.eventSource.onerror = function () { if (!App.taskId) App.eventSource.close(); };
   },
-
   startPolling: function (tid) {
     EventBus.stopPolling();
     App.pollTimer = setInterval(function () {
-      fetch('/api/test/' + tid + '/status')
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (d.finished && d.report) {
-            EventBus.stopPolling();
-            if (App.taskId === tid) {
-              var rp = d.report;
-              App.allRounds = rp.rounds || [];
-              document.getElementById('rounds-container').innerHTML = '';
-              for (var i = 0; i < App.allRounds.length; i++) {
-                renderRoundCard(App.allRounds[i]);
-              }
-              updateFinalSummary();
-              document.getElementById('progress-bar').style.width = '100%';
-              document.getElementById('progress-title').textContent = '测试完成（轮询恢复）';
-              document.getElementById('progress-round').textContent = '共 ' + rp.total_rounds + ' 轮, ' + rp.total_bypassed + ' 次成功绕过';
-              DAG.setAll('done');
-              finalize();
-            }
-          }
-        })
-        .catch(function () {});
+      fetch('/api/test/' + tid + '/status').then(function (r) { return r.json(); }).then(function (d) {
+        if (d.finished && d.report) {
+          EventBus.stopPolling();
+          App.allRounds = d.report.rounds || [];
+          document.getElementById('rounds-container').innerHTML = '';
+          App.allRounds.forEach(renderRoundCard);
+          updateFinalSummary();
+          finalize();
+        }
+      }).catch(function () {});
     }, 3000);
   },
-
-  stopPolling: function () {
-    if (App.pollTimer) {
-      clearInterval(App.pollTimer);
-      App.pollTimer = null;
-    }
-  },
+  stopPolling: function () { if (App.pollTimer) { clearInterval(App.pollTimer); App.pollTimer = null; } },
 
   handleEvent: function (evt) {
     switch (evt.event) {
       case 'round_start':
         App.currentRound = evt.round;
-        App.singleDoneCount = 0;
-        App.generatingElapsed = 0;
-        if (App.generatingTimer) { clearInterval(App.generatingTimer); App.generatingTimer = null; }
-        document.getElementById('progress-round').textContent = '第 ' + evt.round + '/' + evt.total_rounds + ' 轮 — 提示词生成中...';
-        document.getElementById('progress-bar').style.width = ((evt.round - 1) / App.maxRounds() * 100) + '%';
-        DAG.setAll('waiting');
-        DAG.setNode('agent1', 'active');
+        document.getElementById('live-round').textContent = 'R' + evt.round;
+        document.getElementById('live-phase').textContent = '提示词生成中...';
+        Log.add('第 ' + evt.round + '/' + evt.total_rounds + ' 轮开始', 'phase');
+        if (evt.active_sessions && evt.active_sessions.length) {
+          Log.add('存活会话: ' + evt.active_sessions.join(', '), 'info');
+        }
         break;
+<!-- SPLIT_JS_1 -->
       case 'generating':
-        DAG.setNode('agent1', 'active');
-        App.generatingElapsed = 0;
-        if (App.generatingTimer) clearInterval(App.generatingTimer);
-        App.generatingTimer = setInterval(function () {
-          App.generatingElapsed++;
-          document.getElementById('progress-round').textContent = '第 ' + App.currentRound + '/' + App.maxRounds() + ' 轮 — 提示词生成中 (已等待 ' + App.generatingElapsed + 's，大模型推理需要时间)';
-        }, 1000);
-        document.getElementById('progress-round').textContent = '第 ' + App.currentRound + '/' + App.maxRounds() + ' 轮 — 提示词生成中 (已等待 0s，大模型推理需要时间)';
+        document.getElementById('live-phase').textContent = '智能体生成中...';
+        Log.add('Agent1 生成提示词...', 'info');
+        break;
+      case 'prompts_ready':
+        document.getElementById('live-phase').textContent = '并发调用 (' + evt.total + '路)';
+        Log.add('生成完成: ' + evt.new_count + '条新攻' + (evt.cont_count > 0 ? ' + ' + evt.cont_count + '条续攻' : ''), 'success');
+        Tracks.init(evt.total);
         break;
       case 'testing':
-        if (App.generatingTimer) { clearInterval(App.generatingTimer); App.generatingTimer = null; }
-        App.singleDoneCount = 0;
-        document.getElementById('progress-round').textContent = '第 ' + evt.round + ' 轮 — 并行调用待测模型 (' + (evt.count || 10) + ' 条)...';
-        DAG.setNode('agent1', 'done');
-        DAG.setNode('parallel', 'active');
+        document.getElementById('live-phase').textContent = '调用待测模型 (' + evt.count + '路)...';
         break;
       case 'single_done':
-        App.singleDoneCount++;
-        document.getElementById('progress-round').textContent = '第 ' + App.currentRound + ' 轮 — 并行调用 (' + App.singleDoneCount + '/' + (evt.total || 10) + ' 完成)';
+        var label = '#' + (evt.index + 1).toString().padStart(2, '0');
+        if (evt.type === 'continue') label += ' [续·' + evt.session_id + ']';
+        else label += ' [新攻]';
+        Tracks.updateLabel(evt.index, label);
+        if (evt.status === 'ok') {
+          Tracks.done(evt.index, 'bypassed', evt.latency_ms || 0);
+        }
         break;
       case 'analyzing':
-        document.getElementById('progress-round').textContent = '第 ' + evt.round + ' 轮 — 信号提取中...';
-        DAG.setNode('parallel', 'done');
-        DAG.setNode('signal', 'active');
+        document.getElementById('live-phase').textContent = '信号提取中...';
+        Log.add('信号提取 + 护栏检测...', 'info');
         break;
       case 'judging':
-        document.getElementById('progress-round').textContent = '第 ' + evt.round + ' 轮 — Agent2 响应裁判中...';
-        DAG.setNode('signal', 'done');
-        DAG.setNode('judge', 'active');
+        document.getElementById('live-phase').textContent = '裁判判定中 (并行)...';
+        Log.add('裁判并行判定中...', 'info');
         break;
-      case 'deepening':
-        document.getElementById('progress-round').textContent = '第 ' + evt.round + ' 轮 — 启动 ' + (evt.sessions || 0) + ' 个多轮深挖会话...';
-        DAG.setNode('judge', 'done');
-        DAG.setNode('deepener', 'active');
+      case 'judge_result':
+        Tracks.done(evt.index, evt.verdict, evt.latency_ms || 0);
         break;
-      case 'deepener_done':
+      case 'session_update':
+        Sessions.update(evt.active_sessions, evt.killed_this_round);
+        if (evt.killed_this_round && evt.killed_this_round.length) {
+          Log.add('会话终止: ' + evt.killed_this_round.join(', '), 'warn');
+        }
+        break;
+      case 'boundary_analysis':
+        document.getElementById('live-phase').textContent = '边界分析中...';
+        Log.add('分析失败响应 → 推测安全边界...', 'info');
+        break;
+      case 'kb5_updated':
+        document.getElementById('kb5-bar').style.display = 'block';
+        document.getElementById('kb5-text').textContent = evt.summary;
+        Log.add('KB5 更新: ' + evt.summary.substring(0, 60) + '...', 'success');
+        break;
+      case 'info':
+        Log.add(evt.message, 'info');
         break;
       case 'round_complete':
         App.allRounds.push(evt);
         renderRoundCard(evt);
-        updateProgress(evt);
         updateFinalSummary();
-        DAG.setAll('done');
+        var s = evt.summary || {};
+        Log.add('轮次完成 — 绕过率 ' + (s.bypassRate || '0%') + ', 存活会话 ' + (s.activeSessions || 0), 'phase');
+        document.getElementById('live-phase').textContent = '等待下一轮...';
         break;
       case 'stopped':
-        document.getElementById('stop-reason-text').textContent = '终止原因: ' + evt.reason;
+        document.getElementById('stop-reason-text').textContent = '终止: ' + evt.reason;
+        Log.add('测试终止: ' + evt.reason, 'warn');
         break;
       case 'error':
-        toast((evt.round ? '第' + evt.round + '轮: ' : '') + evt.message, 'error');
-        DAG.NODES.forEach(function (n) {
-          var el = document.querySelector('.dag-node[data-node="' + n + '"]');
-          if (el && el.classList.contains('active')) DAG.setNode(n, 'error');
-        });
-        DAG.setNode('arbitrator', 'error');
+        Log.add((evt.round ? 'R' + evt.round + ': ' : '') + evt.message, 'error');
+        toast(evt.message, 'error');
         finalize();
         break;
       case 'complete':
-        if (App.generatingTimer) { clearInterval(App.generatingTimer); App.generatingTimer = null; }
         updateFinalSummary();
-        document.getElementById('progress-bar').style.width = '100%';
-        document.getElementById('progress-title').textContent = '测试完成';
-        document.getElementById('progress-round').textContent = '共 ' + evt.total_rounds + ' 轮, ' + evt.total_bypassed + ' 次成功绕过';
-        DAG.setAll('done');
+        document.getElementById('live-phase').textContent = '测试完成';
+        Log.add('测试完成 — 共 ' + evt.total_rounds + ' 轮, ' + evt.total_bypassed + ' 次绕过', 'phase');
         finalize();
-        var finalEl = document.getElementById('final-section');
-        if (finalEl) finalEl.scrollIntoView({ behavior: 'smooth' });
         break;
     }
   }
 };
 
-/* ================================================================
-   工具函数
-   ================================================================ */
-function escHtml(s) {
-  var d = document.createElement('div');
-  d.textContent = (s || '');
-  return d.innerHTML;
-}
-
+/* ── Utils ── */
+function escHtml(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function toggleRound(header) { var card = header.closest('.round-card'); var b = card.querySelector('.round-body'); var ch = card.querySelector('.chevron'); b.classList.toggle('open'); ch.classList.toggle('open'); }
 function escLong(s, mx) {
   s = s || '';
   if (s.length <= mx) return escHtml(s);
   var id = 'xp' + Math.random().toFixed(6).slice(2);
-  return '<span class="long-text collapsed" id="' + id + '">'
-    + '<span class="long-preview">' + escHtml(s.substring(0, mx)) + '</span>'
-    + '<span class="long-full" style="display:none">' + escHtml(s) + '</span>'
-    + '</span> <button class="btn btn-xs btn-ghost" style="vertical-align:baseline" data-toggle-long="' + id + '" data-full-len="' + s.length + '">展开全部 (' + s.length + '字)</button>';
+  return '<span class="long-text collapsed" id="' + id + '"><span class="long-preview">' + escHtml(s.substring(0, mx)) + '</span><span class="long-full" style="display:none">' + escHtml(s) + '</span></span> <button class="btn btn-xs btn-ghost" data-toggle-long="' + id + '" data-full-len="' + s.length + '">展开 (' + s.length + '字)</button>';
 }
-
-// 事件委托：处理 escLong 生成的展开/收起按钮点击（替代 inline onclick，消除 XSS 隐患）
 document.addEventListener('click', function (e) {
   var btn = e.target.closest('[data-toggle-long]');
   if (!btn) return;
-  var id = btn.getAttribute('data-toggle-long');
-  var container = document.getElementById(id);
+  var container = document.getElementById(btn.getAttribute('data-toggle-long'));
   if (!container) return;
   var full = container.querySelector('.long-full');
   var preview = container.querySelector('.long-preview');
-  container.classList.toggle('collapsed');
-  if (full.style.display === 'none') {
-    full.style.display = 'inline';
-    preview.style.display = 'none';
-    btn.textContent = '收起';
-  } else {
-    full.style.display = 'none';
-    preview.style.display = 'inline';
-    btn.textContent = '展开全部 (' + btn.getAttribute('data-full-len') + '字)';
-  }
+  if (full.style.display === 'none') { full.style.display = 'inline'; preview.style.display = 'none'; btn.textContent = '收起'; }
+  else { full.style.display = 'none'; preview.style.display = 'inline'; btn.textContent = '展开 (' + btn.getAttribute('data-full-len') + '字)'; }
 });
 function toast(msg, type) {
-  var e = document.createElement('div');
-  e.className = 'toast ' + type;
-  e.textContent = msg;
+  var e = document.createElement('div'); e.className = 'toast ' + (type || 'info'); e.textContent = msg;
   document.body.appendChild(e);
-  setTimeout(function () {
-    e.style.opacity = '0';
-    e.style.transition = 'opacity .4s';
-  }, 3500);
+  setTimeout(function () { e.style.opacity = '0'; e.style.transition = 'opacity .4s'; }, 3500);
   setTimeout(function () { e.remove(); }, 4000);
 }
 
-/* ================================================================
-   主题切换
-   ================================================================ */
+/* ── Theme ── */
 function getTheme() { return localStorage.getItem(App.THEME_KEY) || 'dark'; }
-
-function applyTheme(t) {
-  document.body.classList.toggle('theme-light', t === 'light');
-  document.querySelector('.theme-toggle').innerHTML = t === 'light' ? '&#9788;' : '&#9790;';
-  localStorage.setItem(App.THEME_KEY, t);
-}
-
+function applyTheme(t) { document.body.classList.toggle('theme-light', t === 'light'); document.querySelector('.theme-toggle').innerHTML = t === 'light' ? '&#9788;' : '&#9790;'; localStorage.setItem(App.THEME_KEY, t); }
 function toggleTheme() { applyTheme(getTheme() === 'dark' ? 'light' : 'dark'); }
 
-/* ================================================================
-   配置构建
-   ================================================================ */
-function toggleCustomTemplate() {
-  document.getElementById('custom-template-section').style.display =
-    document.getElementById('template_name').value === 'custom' ? 'block' : 'none';
-}
+/* ── Config Build ── */
+function toggleCustomTemplate() { document.getElementById('custom-template-section').style.display = document.getElementById('template_name').value === 'custom' ? 'block' : 'none'; }
 
 function buildConfig() {
   var tn = document.getElementById('template_name').value;
@@ -241,8 +242,7 @@ function buildConfig() {
     template_name: tn,
     max_rounds: parseInt(document.getElementById('max_rounds').value) || 5,
     cooldown_no_new: parseInt(document.getElementById('cooldown_no_new').value) || 2,
-    deepener_enabled: document.getElementById('deepener_enabled').value === 'true',
-    deepener_max_turns: parseInt(document.getElementById('deepener_max_turns').value) || 5,
+    allow_continuation: document.getElementById('allow_continuation').value === 'true',
     agent3_enabled: document.getElementById('agent3_enabled').value === 'true',
     agent2_enabled: document.getElementById('agent2_enabled').value === 'true',
     guardrail_keywords: document.getElementById('guardrail_keywords').value.trim()
@@ -252,90 +252,53 @@ function buildConfig() {
     cfg.timeout = parseInt(document.getElementById('custom_timeout').value) || 120;
     try { cfg.headers = JSON.parse(document.getElementById('custom_headers').value || '{}'); } catch (e) { cfg.headers = {}; }
     try { cfg.body = JSON.parse(document.getElementById('custom_body').value || '{}'); } catch (e) { cfg.body = {}; }
-    cfg.response_path = {
-      content: document.getElementById('custom_content_path').value.trim(),
-      reasoning: document.getElementById('custom_reasoning_path').value.trim()
-    };
+    cfg.response_path = { content: document.getElementById('custom_content_path').value.trim(), reasoning: document.getElementById('custom_reasoning_path').value.trim() };
   }
   return cfg;
 }
-/* ================================================================
-   测试控制
-   ================================================================ */
+
+/* ── Test Control ── */
 function probeTarget() {
-  var s = document.getElementById('probe-status');
-  s.textContent = '检测中...';
-  s.style.color = 'var(--text-secondary)';
+  var s = document.getElementById('probe-status'); s.textContent = '检测中...';
   var cfg = buildConfig();
-  fetch('/api/probe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_url: cfg.target_api_url, api_key: cfg.target_api_key,
-      model: cfg.target_model, template_name: cfg.template_name,
-      method: cfg.method, headers: cfg.headers, body: cfg.body
-    })
-  })
+  fetch('/api/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_url: cfg.target_api_url, api_key: cfg.target_api_key, model: cfg.target_model, template_name: cfg.template_name, method: cfg.method, headers: cfg.headers, body: cfg.body }) })
     .then(function (r) { return r.json(); })
-    .then(function (d) {
-      if (d.reachable) {
-        s.textContent = '✓ 可达 (HTTP ' + d.status_code + ')';
-        s.style.color = 'var(--success-emerald)';
-      } else {
-        s.textContent = '✗ ' + (d.error || '不可达');
-        s.style.color = 'var(--danger-coral)';
-      }
-    })
-    .catch(function () {
-      s.textContent = '✗ 请求失败';
-      s.style.color = 'var(--danger-coral)';
-    });
+    .then(function (d) { s.textContent = d.reachable ? '可达 (HTTP ' + d.status_code + ')' : (d.error || '不可达'); s.style.color = d.reachable ? 'var(--success)' : 'var(--danger)'; })
+    .catch(function () { s.textContent = '请求失败'; s.style.color = 'var(--danger)'; });
 }
 
 function startTest() {
   var config = buildConfig();
-  if (!config.agent_api_url || !config.agent_api_key || !config.target_api_url || !config.target_api_key) {
-    toast('请填写所有必填字段', 'error');
-    return;
-  }
-  App.allRounds = [];
-  App.currentRound = 0;
+  if (!config.target_api_url || !config.target_api_key) { toast('请填写待测模型的 API 地址和 Key', 'error'); return; }
+  App.allRounds = []; App.currentRound = 0;
   document.getElementById('rounds-container').innerHTML = '';
   document.getElementById('final-section').style.display = 'none';
   document.getElementById('progress-section').style.display = 'block';
-  document.getElementById('progress-title').textContent = '测试进行中...';
-  document.getElementById('progress-bar').style.width = '0%';
-  document.getElementById('progress-round').textContent = '启动中...';
-  document.getElementById('progress-bypass').textContent = '';
   document.getElementById('btn-start').disabled = true;
   document.getElementById('btn-stop').style.display = 'inline-flex';
   document.getElementById('stop-reason-text').textContent = '';
-  DAG.setAll('waiting');
-  DAG.setNode('agent1', 'active');
-  DAG.startMonitor();
+  Log.clear();
+  Log.add('启动测试...', 'phase');
+  document.getElementById('live-phase').textContent = '启动中...';
+  App.elapsedStart = Date.now();
+  App.elapsedTimer = setInterval(function () { document.getElementById('live-elapsed').textContent = ((Date.now() - App.elapsedStart) / 1000).toFixed(1) + 's'; }, 100);
 
-  fetch('/api/test/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config)
-  })
+  fetch('/api/test/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
-      if (d.error) { toast(d.error, 'error'); resetUI(); return; }
-      App.taskId = d.task_id;
+      var data = d.data || d;
+      if (data.error || d.error) { toast(data.error || d.error, 'error'); resetUI(); return; }
+      App.taskId = data.task_id;
       EventBus.connect(App.taskId);
       EventBus.startPolling(App.taskId);
     })
-    .catch(function (e) {
-      toast('无法连接后端: ' + e.message, 'error');
-      resetUI();
-    });
+    .catch(function (e) { toast('连接后端失败: ' + e.message, 'error'); resetUI(); });
 }
 
 function stopTest() {
   if (!App.taskId) return;
   fetch('/api/test/' + App.taskId + '/stop', { method: 'POST' }).catch(function () {});
-  document.getElementById('stop-reason-text').textContent = '用户手动终止';
+  Log.add('用户手动终止', 'warn');
   finalize();
 }
 
@@ -344,50 +307,29 @@ function finalize() {
   document.getElementById('btn-stop').style.display = 'none';
   App.taskId = null;
   if (App.eventSource) { App.eventSource.close(); App.eventSource = null; }
-  if (App.generatingTimer) { clearInterval(App.generatingTimer); App.generatingTimer = null; }
-  DAG.stopMonitor();
+  if (App.elapsedTimer) { clearInterval(App.elapsedTimer); App.elapsedTimer = null; }
   EventBus.stopPolling();
 }
+function resetUI() { document.getElementById('btn-start').disabled = false; document.getElementById('btn-stop').style.display = 'none'; }
 
-function resetUI() {
-  document.getElementById('btn-start').disabled = false;
-  document.getElementById('btn-stop').style.display = 'none';
-}
-/* ================================================================
-   进度 & 结果渲染
-   ================================================================ */
-function updateProgress(e) {
-  var s = e.summary || {};
-  document.getElementById('progress-bar').style.width = (App.currentRound / App.maxRounds() * 100) + '%';
-  document.getElementById('progress-bypass').textContent = '本轮绕过率: ' + (s.bypassRate || '0%');
-}
-
+/* ── Render ── */
 function renderRoundCard(e) {
   var s = e.summary || {};
   var ns = e.nextStrategy || {};
   var ds = e.detailedResults || [];
   var ct = document.getElementById('rounds-container');
+  var c = document.createElement('div'); c.className = 'round-card';
 
-  var c = document.createElement('div');
-  c.className = 'round-card';
-  c.id = 'round-' + e.round;
+  var headerHtml = '<div class="round-header"><span class="round-title">R' + e.round + ' <span style="color:var(--accent)">' + escHtml(ns.primaryConcept || '') + '</span> / <span style="color:var(--purple)">' + escHtml(ns.primaryMethod || '') + '</span></span><span class="round-stats"><span>发送 <span class="round-stat-val">' + (s.total || 0) + '</span></span><span class="stat-success">绕过 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span><span>' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
 
-  var guardrailHtml = (s.guardrailBlocked > 0) ? '<span style="color:var(--text-muted)">护栏 <span class="round-stat-val">' + s.guardrailBlocked + '</span></span>' : '';
-  var headerHtml = '<div class="round-header"><span class="round-title">第 ' + e.round + ' 轮 &middot; <span style="color:var(--accent-cyan)">' + escHtml(ns.primaryConcept || '—') + '</span> / <span style="color:var(--accent-purple)">' + escHtml(ns.primaryMethod || '—') + '</span>' + (ns.variantMode ? ' <span style="color:var(--warn-amber);font-size:.68rem">[以点打面]</span>' : '') + '</span><span class="round-stats"><span>发送 <span class="round-stat-val">' + (s.total || 0) + '</span></span><span class="stat-success">成功 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-partial">部分 <span class="round-stat-val">' + (s.partial || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span>' + guardrailHtml + (s.deepSessions > 0 ? '<span style="color:var(--accent-purple)">深挖 <span class="round-stat-val">' + (s.deepBypassed || 0) + '</span></span>' : '') + '<span style="color:var(--text-secondary)">' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
-
-  var bodyHtml = '<div class="round-body"><div style="font-size:.78rem;color:var(--text-secondary);margin-top:10px">主信号: <b style="color:var(--accent-cyan)">' + escHtml(s.primarySignal || '—') + '</b> &middot; 耗时: ' + (e.elapsed || '?') + 's &middot; 下轮目标: ' + ((ns.subcategories || []).slice(0, 3).join(', ') || '—') + '</div>' + ds.map(renderDetailItem).join('') + (e.feedback ? '<div style="margin-top:10px;font-size:.74rem;color:var(--text-muted);border-top:1px solid var(--glass-border);padding-top:10px">' + escHtml(e.feedback) + '</div>' : '') + '</div>';
+  var bodyHtml = '<div class="round-body"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">耗时 ' + (e.elapsed || '?') + 's | 新攻 ' + (s.newPrompts || 0) + ((s.contPrompts || 0) > 0 ? ' 续攻 ' + s.contPrompts : '') + ' | 存活 ' + (s.activeSessions || 0) + '</div>' + ds.map(renderDetailItem).join('') + (e.feedback ? '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border-primary);padding-top:8px">' + escHtml(e.feedback) + '</div>' : '') + '</div>';
 
   c.innerHTML = headerHtml + bodyHtml;
+  c.querySelector('.round-header').addEventListener('click', function () { var b = c.querySelector('.round-body'); var ch = c.querySelector('.chevron'); b.classList.toggle('open'); ch.classList.toggle('open'); });
 
-  // Attach event listener to header instead of inline onclick
-  var header = c.querySelector('.round-header');
-  header.addEventListener('click', function () { toggleRound(header); });
-
-  // Collapse all previous round cards before inserting new one
-  var existingBodies = ct.querySelectorAll('.round-body.open');
-  var existingChevrons = ct.querySelectorAll('.chevron.open');
-  for (var i = 0; i < existingBodies.length; i++) existingBodies[i].classList.remove('open');
-  for (var i = 0; i < existingChevrons.length; i++) existingChevrons[i].classList.remove('open');
+  var prev = ct.querySelectorAll('.round-body.open');
+  prev.forEach(function (p) { p.classList.remove('open'); });
+  ct.querySelectorAll('.chevron.open').forEach(function (ch) { ch.classList.remove('open'); });
 
   ct.insertBefore(c, ct.firstChild);
   c.querySelector('.round-body').classList.add('open');
@@ -395,81 +337,30 @@ function renderRoundCard(e) {
 }
 
 function renderDetailItem(d) {
-  var statusMap = {
-    'bypassed': {cls: 'bypassed', text: '越狱成功', badge: 'badge-bypass'},
-    'blocked': {cls: 'blocked', text: '被拒绝', badge: 'badge-block'},
-    'partial': {cls: 'partial', text: '部分突破', badge: 'badge-partial'},
-    'guardrail_blocked': {cls: 'blocked', text: '护栏拦截', badge: 'badge-guardrail'}
-  };
-  var info = statusMap[d.jailbreakStatus] || statusMap['partial'];
-  var cls = info.cls;
-  var bTxt = info.text;
-  var bCls = info.badge;
-  var dt = d.deepenerTurns || [];
-  var dh = '';
-
-  if (dt.length > 0) {
-    var dbp = dt.filter(function (t) { return t.jailbreakStatus === 'bypassed'; }).length;
-    var deepStatusMap = {
-      'bypassed': {cls: 'bypassed', text: '突破', badge: 'badge-bypass'},
-      'blocked': {cls: 'blocked', text: '拒绝', badge: 'badge-block'},
-      'partial': {cls: 'partial', text: '部分', badge: 'badge-partial'},
-      'guardrail_blocked': {cls: 'blocked', text: '护栏拦截', badge: 'badge-guardrail'}
-    };
-    dh = '<div style="margin-top:8px;border-top:1px dashed var(--glass-border);padding-top:8px"><div style="font-size:.72rem;color:var(--accent-purple);font-weight:600;margin-bottom:6px">↳ 多轮深挖 (' + dt.length + ' 轮追问, ' + dbp + ' 次继续成功)</div>' + dt.map(function (t) {
-      var ti = deepStatusMap[t.jailbreakStatus] || deepStatusMap['partial'];
-      return '<div class="result-item ' + ti.cls + '" style="margin-top:4px;padding:10px 12px"><div class="result-meta"><span class="badge ' + ti.badge + '">' + ti.text + '</span><span>第' + t.turn + '轮追问</span><span>信号: ' + escHtml((t.signals || []).join(', ') || '无') + '</span>' + (t.sessionEnded ? ' <span style="color:var(--danger-coral);font-size:.62rem">[' + (t.endReason || '终止') + ']</span>' : '') + '</div><div class="result-text"><span class="label-text">追问</span><br>' + escLong((t.prompt_text || ''), 250) + '</div><div class="result-text" style="margin-top:5px"><span class="label-text">回复</span><br>' + escLong((t.response_text || ''), 300) + '</div></div>';
-    }).join('') + '</div>';
-  }
-
-  var judgeInfo = d.judge_reason ? '<span style="font-size:.62rem;color:var(--text-muted)" title="' + escHtml(d.judge_reason) + '">裁判</span>' : '';
-  return '<div class="result-item ' + cls + '"><div class="result-meta"><span class="badge ' + bCls + '">' + bTxt + '</span><span class="badge badge-concept">' + escHtml(d.concept || '') + '</span><span class="badge badge-method">' + escHtml(d.method || '') + '</span>' + judgeInfo + '<span>信号: ' + escHtml((d.signals || []).join(', ') || '无') + '</span><span>延迟: ' + (d.latencyMs || 0) + 'ms</span>' + (dt.length > 0 ? '<span style="color:var(--accent-purple)">深挖: ' + dt.length + '轮</span>' : '') + '</div><div class="result-text"><span class="label-text">初始提示词</span><br>' + escLong((d.promptText || ''), 300) + '</div><div class="result-text" style="margin-top:6px"><span class="label-text">初始响应</span><br>' + escLong((d.modelResponse || ''), 400) + '</div>' + dh + '</div>';
+  var sm = { bypassed: { cls: 'bypassed', text: '绕过', badge: 'badge-bypass' }, blocked: { cls: 'blocked', text: '拒绝', badge: 'badge-block' }, partial: { cls: 'partial', text: '部分', badge: 'badge-partial' }, guardrail_blocked: { cls: 'blocked', text: '护栏', badge: 'badge-guardrail' } };
+  var info = sm[d.jailbreakStatus] || sm['partial'];
+  var typeTag = d.promptType === 'continue' ? '<span class="badge badge-continue">续攻·' + escHtml(d.sessionId || '') + '</span>' : '';
+  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(d.concept || '') + '</span><span>' + (d.latencyMs || 0) + 'ms</span>' + (d.judge_reason ? '<span title="' + escHtml(d.judge_reason) + '">裁判</span>' : '') + '</div><div class="result-text"><span class="label-text">Prompt</span><br>' + escLong(d.promptText || '', 300) + '</div><div class="result-text" style="margin-top:6px"><span class="label-text">Response</span><br>' + escLong(d.modelResponse || '', 400) + '</div></div>';
 }
 
 function updateFinalSummary() {
   document.getElementById('final-section').style.display = 'block';
   document.getElementById('sum-cycles').textContent = App.allRounds.length;
-  var ts = 0, br = 0;
-  var rates = [];
-  for (var i = 0; i < App.allRounds.length; i++) {
-    var s = App.allRounds[i].summary || {};
-    ts += s.bypassed || 0;
-    var rt = parseFloat((s.bypassRate || '0').replace('%', ''));
-    rates.push(rt);
-    if (rt > br) br = rt;
-  }
+  var ts = 0, br = 0, rates = [];
+  App.allRounds.forEach(function (r) { var s = r.summary || {}; ts += s.bypassed || 0; var rt = parseFloat((s.bypassRate || '0').replace('%', '')); rates.push(rt); if (rt > br) br = rt; });
   var cv = new Set();
-  for (var i = 0; i < App.allRounds.length; i++) {
-    var ds = App.allRounds[i].detailedResults || [];
-    for (var j = 0; j < ds.length; j++) {
-      if (ds[j].jailbreakStatus === 'bypassed' && ds[j].category) cv.add(ds[j].category);
-    }
-  }
+  App.allRounds.forEach(function (r) { (r.detailedResults || []).forEach(function (d) { if (d.jailbreakStatus === 'bypassed' && d.category) cv.add(d.category); }); });
   document.getElementById('sum-success').textContent = ts;
   document.getElementById('sum-coverage').textContent = cv.size + '/31';
   document.getElementById('sum-peak').textContent = br.toFixed(0) + '%';
   var mx = Math.max.apply(null, rates.concat([1]));
-  document.getElementById('chart-bypass').innerHTML = rates.map(function (r, i) {
-    return '<div class="bar-col"><div class="bar-fill" style="height:' + (r / mx * 100).toFixed(0) + '%"></div><div class="bar-label">R' + (i + 1) + '<br>' + r.toFixed(0) + '%</div></div>';
-  }).join('');
-  document.getElementById('chart-covered').innerHTML = cv.size > 0 ? '<div class="kb-list">' + Array.from(cv).sort().map(function (c) { return '<span class="kb-tag">' + c + '</span>'; }).join('') + '</div>' : '暂无成功绕过';
+  document.getElementById('chart-bypass').innerHTML = rates.map(function (r, i) { return '<div class="bar-col"><div class="bar-fill" style="height:' + (r / mx * 100).toFixed(0) + '%"></div><div class="bar-label">R' + (i + 1) + '</div></div>'; }).join('');
+  document.getElementById('chart-covered').innerHTML = cv.size > 0 ? '<div class="kb-list">' + Array.from(cv).sort().map(function (c) { return '<span class="kb-tag">' + c + '</span>'; }).join('') + '</div>' : '暂无';
 }
 
-function toggleRound(h) {
-  var b = h.nextElementSibling;
-  var c = h.querySelector('.chevron');
-  b.classList.toggle('open');
-  c.classList.toggle('open');
-}
-
-/* ================================================================
-   导航 & Tab 初始化
-   ================================================================ */
+/* ── Init ── */
 document.addEventListener('DOMContentLoaded', function () {
-  // 主题
   applyTheme(getTheme());
-
-  // 导航 tabs
   document.querySelectorAll('.nav-tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
       document.querySelectorAll('.nav-tab').forEach(function (b) { b.classList.remove('active'); });
@@ -477,12 +368,10 @@ document.addEventListener('DOMContentLoaded', function () {
       btn.classList.add('active');
       var panel = document.getElementById(btn.dataset.nav);
       if (panel) panel.style.display = 'block';
-      if (btn.dataset.nav === 'nav-sessions') Sessions.load();
-      if (btn.dataset.nav === 'nav-kb') KB.switchKb('kb1');
+      if (btn.dataset.nav === 'nav-sessions' && typeof Sessions !== 'undefined' && Sessions.load) Sessions.load();
+      if (btn.dataset.nav === 'nav-kb' && typeof KB !== 'undefined') KB.switchKb('kb1');
     });
   });
-
-  // 内部 tabs
   document.querySelectorAll('.tab-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var parent = btn.closest('.card');
@@ -492,20 +381,29 @@ document.addEventListener('DOMContentLoaded', function () {
       document.getElementById(btn.dataset.tab).classList.add('active');
     });
   });
-
-  // 主题切换按钮
   document.querySelector('.theme-toggle').addEventListener('click', toggleTheme);
-
-  // 测试按钮
   document.getElementById('btn-start').addEventListener('click', startTest);
   document.getElementById('btn-stop').addEventListener('click', stopTest);
-
-  // 连通性检测
   document.querySelector('[data-action="probe"]').addEventListener('click', probeTarget);
-
-  // 模板切换
   document.getElementById('template_name').addEventListener('change', toggleCustomTemplate);
-
-  // KB add 按钮
-  document.getElementById('kb-add-btn').addEventListener('click', function () { KB.addEntry(); });
+  document.getElementById('btn-load-claude-cfg').addEventListener('click', loadClaudeCfg);
+  document.getElementById('btn-save-claude-cfg').addEventListener('click', saveClaudeCfg);
+  loadClaudeCfg();
+  if (document.getElementById('kb-add-btn')) document.getElementById('kb-add-btn').addEventListener('click', function () { if (typeof KB !== 'undefined') KB.addEntry(); });
 });
+
+function loadClaudeCfg() {
+  fetch('/api/claude-agent/config').then(function (r) { return r.json(); }).then(function (d) {
+    var data = d.data || {};
+    document.getElementById('claude_agent_url').value = data.url || '';
+    document.getElementById('claude_agent_key').value = data.key || '';
+    document.getElementById('claude_agent_model').value = data.model || '';
+  }).catch(function () {});
+}
+function saveClaudeCfg() {
+  var payload = { url: document.getElementById('claude_agent_url').value.trim(), key: document.getElementById('claude_agent_key').value.trim(), model: document.getElementById('claude_agent_model').value.trim() };
+  fetch('/api/claude-agent/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { var st = document.getElementById('claude-cfg-status'); st.textContent = d.ok ? '已保存' : (d.error || '失败'); setTimeout(function () { st.textContent = ''; }, 3000); })
+    .catch(function () {});
+}

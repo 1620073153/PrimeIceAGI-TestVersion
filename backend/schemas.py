@@ -8,7 +8,7 @@ class ValidationError(Exception):
 
 
 def validate_test_config(config: dict) -> dict:
-    required = ["agent_api_url", "agent_api_key", "target_api_url", "target_api_key"]
+    required = ["target_api_url", "target_api_key"]
     missing = [k for k in required if not config.get(k)]
     if missing:
         raise ValidationError(f"缺少必填参数: {', '.join(missing)}")
@@ -19,7 +19,6 @@ def validate_test_config(config: dict) -> dict:
         if not config.get("body"):
             raise ValidationError("自定义模板模式下需要填写请求 Body")
 
-    config.setdefault("agent_model", "deepseek-chat")
     config.setdefault("target_model", "deepseek-chat")
     config.setdefault("max_rounds", 5)
     config.setdefault("cooldown_no_new", 2)

@@ -10,7 +10,8 @@ var Sessions = {
     fetch('/api/sessions')
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        var ss = d.sessions || [];
+        var payload = d.data || d;
+        var ss = payload.sessions || [];
         if (ss.length === 0) {
           ct.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem">暂无历史会话</div>';
           return;
@@ -59,7 +60,7 @@ var Sessions = {
 
           var delBtn = document.createElement('button');
           delBtn.className = 'btn btn-ghost btn-xs';
-          delBtn.style.color = 'var(--danger-coral)';
+          delBtn.style.color = 'var(--danger)';
           delBtn.textContent = '删除';
           delBtn.addEventListener('click', (function (sid) {
             return function () { Sessions.deleteSession(sid); };
@@ -92,7 +93,8 @@ var Sessions = {
     fetch('/api/sessions/' + sid)
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        var rp = d.report || {};
+        var payload = d.data || d;
+        var rp = payload.report || {};
         var rs = rp.rounds || [];
         if (rs.length === 0) {
           ct.innerHTML = '<div style="color:var(--text-muted);font-size:.76rem">无轮次数据</div>';
@@ -108,9 +110,9 @@ var Sessions = {
           roundCard.className = 'round-card';
           roundCard.style.marginBottom = '12px';
 
-          var headerHtml = '<div class="round-header"><span class="round-title">第' + rd.round + '轮 &middot; <span style="color:var(--accent-cyan)">' + escHtml(ns.primaryConcept || '?') + '</span> / <span style="color:var(--accent-purple)">' + escHtml(ns.primaryMethod || '?') + '</span></span><span class="round-stats"><span>发送 <span class="round-stat-val">' + (s.total || 0) + '</span></span><span class="stat-success">成功 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-partial">部分 <span class="round-stat-val">' + (s.partial || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span>' + (s.deepSessions > 0 ? '<span style="color:var(--accent-purple)">深挖 <span class="round-stat-val">' + (s.deepBypassed || 0) + '</span></span>' : '') + '<span style="color:var(--text-secondary)">' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
+          var headerHtml = '<div class="round-header"><span class="round-title">第' + rd.round + '轮 &middot; <span style="color:var(--accent)">' + escHtml(ns.primaryConcept || '?') + '</span> / <span style="color:var(--purple)">' + escHtml(ns.primaryMethod || '?') + '</span></span><span class="round-stats"><span>发送 <span class="round-stat-val">' + (s.total || 0) + '</span></span><span class="stat-success">成功 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span><span style="color:var(--text-secondary)">' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
 
-          var bodyHtml = '<div class="round-body"><div style="font-size:.78rem;color:var(--text-secondary);margin-top:10px">主信号: <b style="color:var(--accent-cyan)">' + escHtml(s.primarySignal || '—') + '</b> &middot; 耗时: ' + (rd.elapsed || '?') + 's &middot; 下轮目标: ' + ((ns.subcategories || []).slice(0, 3).join(', ') || '—') + '</div>' + ds.map(renderDetailItem).join('') + (rd.feedback ? '<div style="margin-top:10px;font-size:.74rem;color:var(--text-muted);border-top:1px solid var(--glass-border);padding-top:10px">' + escHtml(rd.feedback) + '</div>' : '') + '</div>';
+          var bodyHtml = '<div class="round-body"><div style="font-size:.78rem;color:var(--text-secondary);margin-top:10px">主信号: <b style="color:var(--accent)">' + escHtml(s.primarySignal || '—') + '</b> &middot; 耗时: ' + (rd.elapsed || '?') + 's &middot; 下轮目标: ' + ((ns.subcategories || []).slice(0, 3).join(', ') || '—') + '</div>' + ds.map(renderDetailItem).join('') + (rd.feedback ? '<div style="margin-top:10px;font-size:.74rem;color:var(--text-muted);border-top:1px solid var(--border-primary);padding-top:10px">' + escHtml(rd.feedback) + '</div>' : '') + '</div>';
 
           roundCard.innerHTML = headerHtml + bodyHtml;
 

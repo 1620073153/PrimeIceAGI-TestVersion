@@ -23,6 +23,12 @@ Thumbs.db
 
 # Claude Code 本地配置（含 API key）
 .claude/
+config/
 
 # 调试截图
 *.png
+
+# 临时测试文件
+_*.json
+_*.log
+test_output_*.json
