@@ -212,6 +212,30 @@ header h1{
 .form-group textarea{min-height:60px;resize:vertical;font-family:var(--font-mono);font-size:12px}
 .hint{font-size:11px;color:var(--text-muted)}
 
+/* Password toggle */
+.input-password-wrap{
+  display:flex;
+  align-items:center;
+  gap:0;
+  position:relative;
+}
+.input-password-wrap input{flex:1;padding-right:32px}
+.btn-eye{
+  position:absolute;
+  right:6px;
+  background:none;
+  border:none;
+  color:var(--text-muted);
+  font-size:14px;
+  cursor:pointer;
+  padding:4px;
+  border-radius:var(--radius-xs);
+  transition:var(--transition);
+  line-height:1;
+}
+.btn-eye:hover{color:var(--text-primary);background:var(--bg-hover)}
+.btn-eye.active{color:var(--accent)}
+
 /* ── Buttons ── */
 .btn{
   display:inline-flex;

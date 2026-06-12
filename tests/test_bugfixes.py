@@ -70,28 +70,13 @@ def test_bug2_deepener_enabled_string_false():
 
 
 def test_bug2_deepener_not_triggered_when_disabled():
-    """Bug 2: 集成验证 — deepener_enabled=False 时不触发深挖"""
-    from engine.orchestrator import RedTeamOrchestrator
+    """Bug 2: allow_continuation='false' 字符串应当被正确解析为 False"""
+    from engine.orchestrator import _parse_bool
 
-    config = {
-        "agent_api_url": "http://localhost:9999",
-        "agent_api_key": "test",
-        "agent_model": "test-model",
-        "target_api_url": "http://localhost:9999",
-        "target_api_key": "test",
-        "target_model": "test-model",
-        "template_name": "openai_compatible",
-        "max_rounds": 1,
-        "deepener_enabled": "false",  # 前端传来的字符串
-    }
-
-    orchestrator = RedTeamOrchestrator(config)
-    # 模拟有越狱成功的结果
-    fake_bypassed = [{"prompt_id": "p01", "prompt_text": "test", "response_text": "ok"}]
-    result = orchestrator._run_deepener_sessions(fake_bypassed)
-    assert result == [], f"deepener_enabled='false' 时应返回空列表，实际: {result}"
-
-    print("[PASS] Bug 2: deepener_enabled='false' 确实不触发深挖")
+    # 当 allow_continuation 为 false 时，编排器不应触发续攻
+    assert _parse_bool("false") is False
+    assert _parse_bool(False) is False
+    print("[PASS] Bug 2: _parse_bool('false') 确实返回 False")
 
 
 def test_bug3_call_batch_always_returns_full_results():

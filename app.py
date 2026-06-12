@@ -6,7 +6,9 @@ Flask 后端: SSE 实时推送 + 多轮调度 + 引擎驱动
 """
 
 import sys
+import os
 import uuid
+import logging
 from flask import Flask, render_template
 from werkzeug.exceptions import HTTPException
 
@@ -17,8 +19,26 @@ from backend.routes import register_blueprints
 from backend.middleware import init_security
 
 
+def _setup_logging():
+    """配置根日志：控制台 + 文件输出"""
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(
+                os.path.join(log_dir, "primeice.log"), encoding="utf-8"
+            ),
+        ],
+    )
+
+
 def create_app() -> Flask:
     """工厂函数：创建并配置 Flask app"""
+    _setup_logging()
     app = Flask(__name__)
     app.config["SECRET_KEY"] = str(uuid.uuid4())
 

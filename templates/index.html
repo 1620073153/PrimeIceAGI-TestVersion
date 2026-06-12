@@ -33,9 +33,9 @@
         <div id="claude-agent-fields">
           <div class="form-grid">
             <div class="form-group"><label>API 地址</label><input id="claude_agent_url" placeholder="https://api.deepseek.com/anthropic"><span class="hint">Anthropic Messages API 兼容端点</span></div>
-            <div class="form-group"><label>API Key</label><input id="claude_agent_key" type="password" placeholder="sk-..." autocomplete="off"></div>
+            <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="claude_agent_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="claude_agent_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
             <div class="form-group"><label>模型名</label><input id="claude_agent_model" placeholder="deepseek-v4-pro"></div>
-            <div class="form-group"><label>&nbsp;</label><div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" id="btn-load-claude-cfg">加载配置</button><button class="btn btn-ghost btn-sm" id="btn-save-claude-cfg">保存配置</button></div><span id="claude-cfg-status" class="hint"></span></div>
+            <div class="form-group"><label>&nbsp;</label><div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" id="btn-load-claude-cfg">加载配置</button><button class="btn btn-ghost btn-sm" id="btn-save-claude-cfg">保存配置</button><button class="btn btn-ghost btn-sm" id="btn-sync-aux" title="将当前配置同步到辅助模型">⇒ 同步到辅助模型</button></div><span id="claude-cfg-status" class="hint"></span></div>
           </div>
         </div>
       </div>
@@ -44,7 +44,7 @@
         <div class="form-grid">
           <div class="form-group full"><span class="hint">裁判(Agent2)和边界分析(Agent3)共用，OpenAI 兼容格式</span></div>
           <div class="form-group"><label>API 地址</label><input id="agent_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"><span class="hint">OpenAI Chat Completions 端点</span></div>
-          <div class="form-group"><label>API Key</label><input id="agent_api_key" type="password" placeholder="sk-..." autocomplete="off"></div>
+          <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="agent_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="agent_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
           <div class="form-group"><label>模型名</label><input id="agent_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
         </div>
       </div>
@@ -52,7 +52,7 @@
         <div class="form-grid">
           <div class="form-group"><label>API 模板</label><select id="template_name"><option value="openai_compatible">OpenAI 兼容格式</option><option value="anthropic_compatible">Anthropic 兼容格式</option><option value="custom">自定义模板</option></select></div>
           <div class="form-group"><label>API 地址</label><input id="target_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"></div>
-          <div class="form-group"><label>API Key</label><input id="target_api_key" type="password" placeholder="sk-..." autocomplete="off"></div>
+          <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="target_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="target_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
           <div class="form-group"><label>模型名</label><input id="target_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
         </div>
         <div id="custom-template-section" style="display:none;margin-top:16px">

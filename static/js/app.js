@@ -84,11 +84,28 @@ var Sessions = {
 
 /* ── EventBus ── */
 var EventBus = {
+  _retryCount: 0,
+  _maxRetries: 5,
   connect: function (taskId) {
     if (App.eventSource) App.eventSource.close();
+    EventBus._retryCount = 0;
+    EventBus._openSSE(taskId);
+  },
+  _openSSE: function (taskId) {
     App.eventSource = new EventSource('/api/test/' + taskId + '/stream');
     App.eventSource.onmessage = function (e) { EventBus.handleEvent(JSON.parse(e.data)); };
-    App.eventSource.onerror = function () { if (!App.taskId) App.eventSource.close(); };
+    App.eventSource.onerror = function () {
+      if (!App.taskId) { App.eventSource.close(); return; }
+      App.eventSource.close();
+      if (EventBus._retryCount < EventBus._maxRetries) {
+        EventBus._retryCount++;
+        Log.add('SSE 断开，3秒后重连 (' + EventBus._retryCount + '/' + EventBus._maxRetries + ')', 'warn');
+        setTimeout(function () { EventBus._openSSE(taskId); }, 3000);
+      } else {
+        Log.add('SSE 重连失败，切换到轮询模式', 'warn');
+        EventBus.startPolling(taskId);
+      }
+    };
   },
   startPolling: function (tid) {
     EventBus.stopPolling();
@@ -102,7 +119,7 @@ var EventBus = {
           updateFinalSummary();
           finalize();
         }
-      }).catch(function () {});
+      }).catch(function () { /* 轮询静默失败，避免打扰用户 */ });
     }, 3000);
   },
   stopPolling: function () { if (App.pollTimer) { clearInterval(App.pollTimer); App.pollTimer = null; } },
@@ -222,6 +239,16 @@ function toast(msg, type) {
   setTimeout(function () { e.remove(); }, 4000);
 }
 
+/* ── Password Toggle ── */
+document.addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-toggle-pw]');
+  if (!btn) return;
+  var input = document.getElementById(btn.getAttribute('data-toggle-pw'));
+  if (!input) return;
+  if (input.type === 'password') { input.type = 'text'; btn.classList.add('active'); }
+  else { input.type = 'password'; btn.classList.remove('active'); }
+});
+
 /* ── Theme ── */
 function getTheme() { return localStorage.getItem(App.THEME_KEY) || 'dark'; }
 function applyTheme(t) { document.body.classList.toggle('theme-light', t === 'light'); document.querySelector('.theme-toggle').innerHTML = t === 'light' ? '&#9788;' : '&#9790;'; localStorage.setItem(App.THEME_KEY, t); }
@@ -297,7 +324,7 @@ function startTest() {
 
 function stopTest() {
   if (!App.taskId) return;
-  fetch('/api/test/' + App.taskId + '/stop', { method: 'POST' }).catch(function () {});
+  fetch('/api/test/' + App.taskId + '/stop', { method: 'POST' }).catch(function () { /* fire-and-forget */ });
   Log.add('用户手动终止', 'warn');
   finalize();
 }
@@ -388,6 +415,7 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('template_name').addEventListener('change', toggleCustomTemplate);
   document.getElementById('btn-load-claude-cfg').addEventListener('click', loadClaudeCfg);
   document.getElementById('btn-save-claude-cfg').addEventListener('click', saveClaudeCfg);
+  document.getElementById('btn-sync-aux').addEventListener('click', syncToAux);
   loadClaudeCfg();
   if (document.getElementById('kb-add-btn')) document.getElementById('kb-add-btn').addEventListener('click', function () { if (typeof KB !== 'undefined') KB.addEntry(); });
 });
@@ -398,12 +426,23 @@ function loadClaudeCfg() {
     document.getElementById('claude_agent_url').value = data.url || '';
     document.getElementById('claude_agent_key').value = data.key || '';
     document.getElementById('claude_agent_model').value = data.model || '';
-  }).catch(function () {});
+  }).catch(function () { toast('加载提示词生成配置失败', 'error'); });
 }
 function saveClaudeCfg() {
   var payload = { url: document.getElementById('claude_agent_url').value.trim(), key: document.getElementById('claude_agent_key').value.trim(), model: document.getElementById('claude_agent_model').value.trim() };
   fetch('/api/claude-agent/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(function (r) { return r.json(); })
     .then(function (d) { var st = document.getElementById('claude-cfg-status'); st.textContent = d.ok ? '已保存' : (d.error || '失败'); setTimeout(function () { st.textContent = ''; }, 3000); })
-    .catch(function () {});
+    .catch(function () { toast('保存配置失败', 'error'); });
+}
+function syncToAux() {
+  var url = document.getElementById('claude_agent_url').value.trim();
+  var key = document.getElementById('claude_agent_key').value.trim();
+  var model = document.getElementById('claude_agent_model').value.trim();
+  if (!url && !key) { toast('提示词生成配置为空，无法同步', 'error'); return; }
+  url = url.replace(/\/anthropic\/?$/, '');
+  document.getElementById('agent_api_url').value = url;
+  document.getElementById('agent_api_key').value = key;
+  document.getElementById('agent_model').value = model;
+  toast('已同步到辅助模型', 'success');
 }

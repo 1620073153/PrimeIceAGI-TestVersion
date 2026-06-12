@@ -44,3 +44,6 @@ config/claude_home/
 _*.json
 _*.log
 test_output_*.json
+
+# 运行时日志
+logs/
