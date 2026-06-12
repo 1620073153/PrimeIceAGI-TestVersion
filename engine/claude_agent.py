@@ -12,8 +12,11 @@ import subprocess
 import re
 import logging
 import os
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+
+from data.kb_store import load_kb
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,46 @@ def _build_prompt_skill_message(
 
     if history_feedback:
         parts.append(f"\n上轮反馈: {history_feedback}")
+
+    # KB4: 高命中率注入模板参考（按相关性选取）
+    kb4 = load_kb("kb4")
+    templates = kb4.get("templates", {})
+    if templates:
+        all_tpls = list(templates.values())
+        # 按本轮策略标签匹配相关模板
+        matched = []
+        unmatched = []
+        match_keys = set()
+        if concept:
+            match_keys.add(concept)
+        if method:
+            match_keys.add(method)
+        for sub in subcategories[:3]:
+            match_keys.add(sub)
+
+        for tpl in all_tpls:
+            tpl_tags = set(tpl.get("tags", []))
+            tpl_cat = tpl.get("category", "")
+            searchable = tpl_tags | {tpl_cat}
+            if match_keys & searchable:
+                matched.append(tpl)
+            else:
+                unmatched.append(tpl)
+
+        # 优先相关的，不足则从剩余随机补
+        selected = matched[:2]
+        if len(selected) < 3:
+            remaining = [t for t in unmatched if t not in selected]
+            if remaining:
+                selected += random.sample(remaining, min(3 - len(selected), len(remaining)))
+
+        if selected:
+            parts.append("\n高命中率参考模板（可借鉴其手法和结构）:")
+            for tpl in selected:
+                text = tpl.get("template_text", "")[:300]
+                tags = ", ".join(tpl.get("tags", []))
+                if text:
+                    parts.append(f"  - [{tags}] {text}")
 
     if strategy.get("variant_mode"):
         parts.append("模式：以点打面，基于上轮成功框架变形。")

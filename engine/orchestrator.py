@@ -19,8 +19,6 @@ from engine.llm_client import LLMClient
 from engine.strategy_arbitrator import decide_next_strategy, check_convergence
 from engine.system_prompt_inferrer import infer_boundary_summary
 from engine.variant_generator import generate_variants
-from data.tc260_standards import CATEGORIES, get_all_subcategories
-from data.bypass_knowledge import BYPASS_METHODS
 
 logger = logging.getLogger(__name__)
 

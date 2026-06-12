@@ -57,7 +57,7 @@ var KB = {
       var infs = data.inferences || [];
       for (var i = 0; i < infs.length; i++) {
         var inf = infs[i];
-        es.push({ key: inf.inference_id || '', name: '推测 #' + (inf.round || '?') + ' (置信度:' + (inf.confidence || '?') + ')', desc: inf.model_identity || '' });
+        es.push({ key: inf.inference_id || ('r' + inf.round), name: '第' + (inf.round || '?') + '轮边界推测', desc: (inf.summary || inf.model_identity || '').substring(0, 120) });
       }
     } else {
       var m = KB.currentId === 'kb2' ? 'concepts' : (KB.currentId === 'kb3' ? 'methods' : 'templates');
@@ -98,7 +98,7 @@ var KB = {
 
       var delBtn = document.createElement('button');
       delBtn.className = 'btn btn-ghost btn-xs';
-      delBtn.style.color = 'var(--danger-coral)';
+      delBtn.style.color = 'var(--danger)';
       delBtn.textContent = '删除';
       delBtn.addEventListener('click', (function (key) {
         return function () { KB.deleteEntry(key); };

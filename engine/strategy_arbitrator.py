@@ -1,48 +1,79 @@
 """
 策略仲裁器 — 信号→策略映射引擎
 根据上一轮的信号分布和越狱结果，决策下一轮的测试策略
-纯规则引擎，零 LLM 延迟
+动态读取 KB1-KB3 JSON，前端编辑后实时生效
 """
 
-from data.tc260_standards import CATEGORIES, CLUSTERS, get_priority_order
-from data.bypass_knowledge import SIGNAL_STRATEGY_MAP, BYPASS_CONCEPTS, BYPASS_METHODS, CONCEPT_METHOD_MAP
+from data.kb_store import load_kb
+
+
+def _load_categories():
+    data = load_kb("kb1")
+    return data.get("categories", {})
+
+
+def _load_clusters():
+    data = load_kb("kb1")
+    return data.get("clusters", {})
+
+
+def _load_concepts():
+    data = load_kb("kb2")
+    return data.get("concepts", {})
+
+
+def _load_methods():
+    data = load_kb("kb3")
+    return data.get("methods", {})
+
+
+def _load_signal_strategy_map():
+    data = load_kb("kb3")
+    return data.get("signal_strategy_map", {})
+
+
+def _load_concept_method_map():
+    data = load_kb("kb3")
+    return data.get("concept_method_map", {})
+
+
+def _get_priority_order():
+    clusters = _load_clusters()
+    return sorted(clusters.keys())
 
 
 def _rotate_method(current_method: str) -> str:
-    """轮换攻击手法"""
-    methods = list(BYPASS_METHODS.keys())
+    methods = list(_load_methods().keys())
     if current_method in methods:
         idx = methods.index(current_method)
         return methods[(idx + 1) % len(methods)]
-    return methods[0]
+    return methods[0] if methods else "academic_framing"
 
 
 def _rotate_concept(current_concept: str) -> str:
-    """轮换绕过概念"""
-    concepts = list(BYPASS_CONCEPTS.keys())
+    concepts = list(_load_concepts().keys())
     if current_concept in concepts:
         idx = concepts.index(current_concept)
         return concepts[(idx + 1) % len(concepts)]
-    return concepts[0]
+    return concepts[0] if concepts else "cognitive_hierarchy_trap"
 
 
 def _rotate_cluster(current_cluster: str) -> str:
-    """轮换目标类簇，按优先级"""
-    priority = get_priority_order()
+    priority = _get_priority_order()
     if current_cluster in priority:
         idx = priority.index(current_cluster)
         return priority[(idx + 1) % len(priority)]
-    return priority[0]
+    return priority[0] if priority else "A"
 
 
 def _get_methods_for_concept(concept_key: str) -> list[str]:
-    """获取绕过概念推荐的方法列表"""
-    return CONCEPT_METHOD_MAP.get(concept_key, ["academic_framing"])
+    cmap = _load_concept_method_map()
+    return cmap.get(concept_key, ["academic_framing"])
 
 
 def _get_subs_for_cluster(cluster_key: str) -> list[str]:
-    """获取类簇下所有子类"""
-    cat = CATEGORIES.get(cluster_key)
+    categories = _load_categories()
+    cat = categories.get(cluster_key)
     if cat:
         return list(cat["subcategories"].keys())
     return []
@@ -71,8 +102,9 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
     current_cluster = current_strategy.get("primary_cluster", "A")
 
     # 计算未覆盖类别
+    categories = _load_categories()
     all_subs = []
-    for cat in CATEGORIES.values():
+    for cat in categories.values():
         all_subs.extend(cat["subcategories"].keys())
     uncovered = [s for s in all_subs if s not in covered_categories]
 
@@ -108,7 +140,8 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
             next_strategy["primary_concept"] = current_concept
         else:
             # 当前类簇已全覆盖，扩散到相邻类簇
-            cross = CLUSTERS.get(current_cluster, {}).get("cross_cluster", [])
+            clusters = _load_clusters()
+            cross = clusters.get(current_cluster, {}).get("cross_cluster", [])
             if cross:
                 next_cluster = cross[0]
                 next_strategy["primary_cluster"] = next_cluster
@@ -117,8 +150,9 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
         return next_strategy
 
     # 情况 2: 有明确信号 → 根据信号映射策略
-    if primary_signal and primary_signal in SIGNAL_STRATEGY_MAP:
-        mapping = SIGNAL_STRATEGY_MAP[primary_signal]
+    signal_map = _load_signal_strategy_map()
+    if primary_signal and primary_signal in signal_map:
+        mapping = signal_map[primary_signal]
         next_strategy["primary_concept"] = mapping["primary_concept"]
         next_strategy["primary_method"] = mapping["primary_method"]
         next_strategy["primary_cluster"] = mapping["target_cluster"]
