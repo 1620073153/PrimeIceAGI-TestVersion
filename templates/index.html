@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PrimeIceAGI — 大模型内容安全红队自动化测试</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+<div class="ocean-particles">
+  <span style="left:5%;width:3px;height:3px;animation-duration:18s;animation-delay:0s"></span>
+  <span style="left:12%;width:2px;height:2px;animation-duration:22s;animation-delay:3s"></span>
+  <span style="left:22%;width:4px;height:4px;animation-duration:25s;animation-delay:1s"></span>
+  <span style="left:35%;width:2px;height:2px;animation-duration:20s;animation-delay:5s"></span>
+  <span style="left:48%;width:3px;height:3px;animation-duration:28s;animation-delay:2s"></span>
+  <span style="left:58%;width:2px;height:2px;animation-duration:19s;animation-delay:7s"></span>
+  <span style="left:67%;width:4px;height:4px;animation-duration:24s;animation-delay:4s"></span>
+  <span style="left:75%;width:2px;height:2px;animation-duration:21s;animation-delay:6s"></span>
+  <span style="left:85%;width:3px;height:3px;animation-duration:26s;animation-delay:8s"></span>
+  <span style="left:92%;width:2px;height:2px;animation-duration:23s;animation-delay:1s"></span>
+</div>
+<div class="water-texture"></div>
+<div class="app">
+  <header>
+    <h1>PrimeIceAGI</h1>
+    <div class="subtitle">LLM Content Security Red-Team Automation &nbsp;&middot;&nbsp; TC260-003</div>
+    <button class="theme-toggle" title="切换主题">&#9790;</button>
+  </header>
+
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-nav="nav-test">测试中心</button>
+    <button class="nav-tab" data-nav="nav-kb">知识库管理</button>
+    <button class="nav-tab" data-nav="nav-sessions">历史会话</button>
+  </div>
+
+  <!-- NAV: Test -->
+  <div id="nav-test" class="nav-panel">
+    <div class="card" id="config-card">
+      <div class="card-title"><span class="icon" style="background:rgba(77,201,246,0.10);color:var(--accent-cyan)">&#9670;</span> 测试配置</div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-agent">提示词生成模型</button>
+        <button class="tab-btn" data-tab="tab-target">待测模型</button>
+        <button class="tab-btn" data-tab="tab-params">测试参数</button>
+      </div>
+      <div class="tab-panel active" id="tab-agent">
+        <div class="form-grid">
+          <div class="form-group"><label>API 地址</label><input id="agent_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"></div>
+          <div class="form-group"><label>API Key</label><input id="agent_api_key" type="password" placeholder="sk-..." autocomplete="off"></div>
+          <div class="form-group"><label>模型名</label><input id="agent_model" placeholder="deepseek-chat" value="deepseek-chat"><span class="hint">用于生成红队测试提示词的 LLM</span></div>
+        </div>
+      </div>
+      <div class="tab-panel" id="tab-target">
+        <div class="form-grid">
+          <div class="form-group"><label>API 模板</label><select id="template_name"><option value="openai_compatible">OpenAI 兼容格式</option><option value="anthropic_compatible">Anthropic 兼容格式</option><option value="custom">自定义模板</option></select><span class="hint">选择与被测模型匹配的 API 格式</span></div>
+          <div class="form-group"><label>API 地址</label><input id="target_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"></div>
+          <div class="form-group"><label>API Key</label><input id="target_api_key" type="password" placeholder="sk-..." autocomplete="off"></div>
+          <div class="form-group"><label>模型名</label><input id="target_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
+        </div>
+        <div id="custom-template-section" style="display:none;margin-top:16px">
+          <div style="font-size:.82rem;color:var(--accent-cyan);margin-bottom:12px;font-weight:600">&#9670; 自定义请求模板</div>
+          <div class="form-grid">
+            <div class="form-group"><label>HTTP Method</label><select id="custom_method"><option value="POST">POST</option><option value="GET">GET</option></select></div>
+            <div class="form-group"><label>超时 (秒)</label><input id="custom_timeout" type="number" value="120" min="10" max="600"></div>
+            <div class="form-group full"><label>Headers (JSON，支持 {{api_key}} {{model}})</label><textarea id="custom_headers" placeholder='{"Authorization":"Bearer {{api_key}}","Content-Type":"application/json","AI-API-CODE":"xxx"}'></textarea></div>
+            <div class="form-group full"><label>Body (JSON，支持 {{prompt}})</label><textarea id="custom_body" placeholder='{"model":"{{model}}","messages":[{"role":"user","content":"{{prompt}}"}],"max_tokens":4096,"temperature":0.7}'></textarea></div>
+            <div class="form-group"><label>响应内容路径</label><input id="custom_content_path" placeholder="choices.0.message.content"><span class="hint">JSON 路径，如 choices.0.message.content</span></div>
+            <div class="form-group"><label>思考过程路径 (可选)</label><input id="custom_reasoning_path" placeholder="choices.0.message.reasoning_content"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tab-panel" id="tab-params">
+        <div class="form-grid">
+          <div class="form-group"><label>最大轮次</label><input id="max_rounds" type="number" min="1" max="50" value="5"></div>
+          <div class="form-group"><label>连续零成功终止</label><input id="cooldown_no_new" type="number" min="1" max="10" value="2"><span class="hint">连续 N 轮零成功则自动终止</span></div>
+          <div class="form-group"><label>多轮深挖</label><select id="deepener_enabled"><option value="true" selected>开启</option><option value="false">关闭</option></select><span class="hint">越狱成功后启动多轮追问深挖</span></div>
+          <div class="form-group"><label>深挖最大轮数</label><input id="deepener_max_turns" type="number" min="1" max="10" value="5"></div>
+          <div class="form-group"><label>Agent3 系统提示词推测</label><select id="agent3_enabled"><option value="true" selected>开启</option><option value="false">关闭</option></select><span class="hint">从响应中推测目标模型的安全边界</span></div>
+          <div class="form-group"><label>Agent2 响应裁判</label><select id="agent2_enabled"><option value="true" selected>开启</option><option value="false">关闭</option></select><span class="hint">用LLM二次判定响应是否真正越狱（提升准确率，消耗额外token）</span></div>
+          <div class="form-group full"><label>护栏拦截关键词</label><input id="guardrail_keywords" placeholder="denyMessage,blockedDetails,promptAttack" value=""><span class="hint">逗号分隔。目标模型响应中出现这些关键词时，直接判定为护栏拦截并终结该会话</span></div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="btn-start">&#9654; 开始测试</button>
+        <button class="btn btn-danger" id="btn-stop" style="display:none">&#9632; 终止</button>
+        <button class="btn btn-ghost btn-sm" data-action="probe">&#8635; 连通性检测</button>
+        <span id="probe-status" style="font-size:.74rem;color:var(--text-muted)"></span>
+      </div>
+    </div>
+    <div class="card" id="progress-section">
+      <div class="card-title"><span class="icon" style="background:rgba(52,211,153,0.10);color:var(--success-emerald)">&#9679;</span><span id="progress-title">测试进行中...</span></div>
+      <div id="dag-container">
+        <div class="dag-node" data-node="agent1"><div class="node-icon">&#9671;</div><div class="node-label">提示词生成</div><div class="node-time">--</div></div>
+        <span class="dag-arrow">&#8594;</span>
+        <div class="dag-node" data-node="parallel"><div class="node-icon">&#9889;</div><div class="node-label">10路并行调用</div><div class="node-time">--</div></div>
+        <span class="dag-arrow">&#8594;</span>
+        <div class="dag-node" data-node="signal"><div class="node-icon">&#9745;</div><div class="node-label">信号提取</div><div class="node-time">--</div></div>
+        <span class="dag-arrow">&#8594;</span>
+        <div class="dag-node" data-node="judge"><div class="node-icon">&#9878;</div><div class="node-label">响应裁判</div><div class="node-time">--</div></div>
+        <span class="dag-arrow">&#8594;</span>
+        <div class="dag-node" data-node="deepener"><div class="node-icon">&#11119;</div><div class="node-label">多轮深挖</div><div class="node-time">--</div></div>
+        <span class="dag-arrow">&#8594;</span>
+        <div class="dag-node" data-node="arbitrator"><div class="node-icon">&#9733;</div><div class="node-label">策略仲裁</div><div class="node-time">--</div></div>
+      </div>
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-bar"></div></div>
+      <div class="progress-meta">
+        <span><span class="live-dot"></span><span id="progress-round">-</span></span>
+        <span id="progress-bypass">-</span>
+      </div>
+    </div>
+
+    <div id="rounds-container"></div>
+    <div class="card" id="final-section">
+      <div class="card-title"><span class="icon" style="background:rgba(124,140,248,0.10);color:var(--accent-purple)">&#9733;</span> 测试报告</div>
+      <div class="summary-grid">
+        <div class="summary-tile"><div class="tile-val tile-cyan" id="sum-cycles">0</div><div class="tile-label">总轮次</div></div>
+        <div class="summary-tile"><div class="tile-val tile-green" id="sum-success">0</div><div class="tile-label">成功绕过</div></div>
+        <div class="summary-tile"><div class="tile-val tile-purple" id="sum-coverage">0/31</div><div class="tile-label">覆盖类别</div></div>
+        <div class="summary-tile"><div class="tile-val" style="color:var(--text-primary)" id="sum-peak">0%</div><div class="tile-label">峰值绕过率</div></div>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-box"><h4>各轮绕过率</h4><div class="bar-chart" id="chart-bypass"></div></div>
+        <div class="chart-box"><h4>覆盖类别</h4><div id="chart-covered" style="font-size:.76rem;color:var(--text-secondary)"></div></div>
+      </div>
+      <div id="stop-reason-text" style="margin-top:16px;font-size:.78rem;color:var(--text-secondary);text-align:center"></div>
+    </div>
+  </div>
+
+  <!-- NAV: KB -->
+  <div id="nav-kb" class="nav-panel" style="display:none">
+    <div class="card">
+      <div class="card-title"><span class="icon" style="background:rgba(124,140,248,0.10);color:var(--accent-purple)">&#128218;</span> 知识库编辑器</div>
+      <div class="kb-subtabs" id="kb-subtabs">
+        <button class="kb-subtab active" data-kb="kb1">KB1: TC260-003 标准</button>
+        <button class="kb-subtab" data-kb="kb2">KB2: 绕过概念</button>
+        <button class="kb-subtab" data-kb="kb3">KB3: 绕过方法</button>
+        <button class="kb-subtab" data-kb="kb4">KB4: 注入模板</button>
+        <button class="kb-subtab" data-kb="kb5">KB5: 推测边界</button>
+      </div>
+      <div style="margin-bottom:14px">
+        <button class="btn btn-primary btn-sm" id="kb-add-btn">+ 新建条目</button>
+        <span id="kb-meta" style="font-size:.74rem;color:var(--text-muted);margin-left:12px"></span>
+      </div>
+      <div id="kb-entries" class="kb-entries">加载中...</div>
+    </div>
+  </div>
+
+  <!-- NAV: Sessions -->
+  <div id="nav-sessions" class="nav-panel" style="display:none">
+    <div class="card">
+      <div class="card-title"><span class="icon" style="background:rgba(52,211,153,0.10);color:var(--success-emerald)">&#128190;</span> 历史会话</div>
+      <div id="sessions-list">加载中...</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="kb-modal">
+  <div class="modal-box">
+    <h3 id="kb-modal-title">编辑条目</h3>
+    <div id="kb-modal-fields"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" id="kb-modal-cancel">取消</button>
+      <button class="btn btn-primary btn-sm" id="kb-modal-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/dag.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/kb.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sessions.js') }}"></script>
+</body>
+</html>
