@@ -47,3 +47,6 @@ test_output_*.json
 
 # 运行时日志
 logs/
+
+# PID 文件（start.bat 用）
+.app_pid

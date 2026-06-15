@@ -10,6 +10,13 @@ from data.kb_store import save_session
 
 _tm = TaskManager()
 _bus = EventBus()
+EVENT_BUS_CLEANUP_DELAY_SECONDS = 300
+
+
+def _schedule_event_bus_cleanup(task_id: str):
+    timer = threading.Timer(EVENT_BUS_CLEANUP_DELAY_SECONDS, _bus.cleanup, args=(task_id,))
+    timer.daemon = True
+    timer.start()
 
 
 def start_test(config: dict) -> str:
@@ -84,3 +91,4 @@ def _run(task_id: str):
         emit("error", message=f"测试异常: {str(e)[:300]}")
     finally:
         _tm.update_task(task_id, finished=True, current_round=None)
+        _schedule_event_bus_cleanup(task_id)

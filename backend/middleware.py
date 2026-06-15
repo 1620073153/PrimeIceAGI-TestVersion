@@ -49,15 +49,25 @@ class _RateLimiter:
 
 
 _rate_limiter = _RateLimiter(max_requests=60, window_seconds=60)
+_cleanup_started = False
+_cleanup_start_lock = threading.Lock()
 
 
 def _start_rate_limiter_cleanup():
-    """每 5 分钟清理一次过期记录"""
+    """每 5 分钟清理一次过期记录，且每个进程只启动一次。"""
+    global _cleanup_started
+
+    with _cleanup_start_lock:
+        if _cleanup_started:
+            return
+        _cleanup_started = True
+
     def loop():
         _rate_limiter.cleanup()
         timer = threading.Timer(300, loop)
         timer.daemon = True
         timer.start()
+
     timer = threading.Timer(300, loop)
     timer.daemon = True
     timer.start()
