@@ -2,13 +2,51 @@
 
 import time
 import threading
-from data.kb_store import load_kb, save_kb, kb_meta, load_kb5, delete_kb5_inference
+from data.kb_store import load_kb, save_kb, kb_meta, load_kb5, delete_kb5_inference, kb5_exists, delete_kb5_file
 from data.tc260_standards import CATEGORIES
 from data.bypass_knowledge import BYPASS_CONCEPTS, BYPASS_METHODS
 from engine.target_client import PRESET_TEMPLATES
 from backend.schemas import validate_kb_entry, ValidationError
+from backend.task_manager import TaskManager
 
 _kb_lock = threading.Lock()
+_kb5_name = "推测的系统提示词边界"
+
+
+def find_running_kb5_task_id() -> str | None:
+    tm = TaskManager()
+    for task in tm.list_tasks():
+        if task.get("finished"):
+            continue
+        full_task = tm.get_task(task.get("task_id", "")) or {}
+        config = full_task.get("config", {})
+        if bool(config.get("agent3_enabled", True)):
+            return task.get("task_id")
+    return None
+
+
+def get_kb5_state() -> dict:
+    task_id = find_running_kb5_task_id()
+    return {
+        "kb_code": "KB5",
+        "name": _kb5_name,
+        "exists": kb5_exists(),
+        "in_use": bool(task_id),
+        "task_id": task_id,
+    }
+
+
+def delete_kb5() -> dict:
+    task_id = find_running_kb5_task_id()
+    if task_id:
+        raise ValidationError("KB5 正在被测试任务使用，请先停止任务或等待完成后再删除")
+    with _kb_lock:
+        status = delete_kb5_file()
+    return {
+        "kb_code": "KB5",
+        "name": _kb5_name,
+        "status": status,
+    }
 
 
 def get_standards() -> dict:

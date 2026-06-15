@@ -1,6 +1,6 @@
 """Knowledge base routes — thin layer delegating to kb_service."""
 
-from flask import Blueprint, request
+from flask import Blueprint, request, jsonify
 from backend.services import kb_service
 from backend.response import ok, err
 from backend.schemas import ValidationError
@@ -37,6 +37,29 @@ def kb_list():
 def kb_data(kb_id: str):
     try:
         return ok(kb_service.get_kb_data(kb_id))
+    except ValidationError as e:
+        return err(e.message, 400)
+
+
+@kb_bp.route("/api/kb/kb5", methods=["GET"])
+def kb5_state():
+    return ok(kb_service.get_kb5_state())
+
+
+@kb_bp.route("/api/kb/kb5", methods=["DELETE"])
+def kb5_delete():
+    state = kb_service.get_kb5_state()
+    if state.get("in_use"):
+        return jsonify({
+            "ok": False,
+            "error": {
+                "code": "KB5_IN_USE",
+                "message": "KB5 正在被测试任务使用，请先停止任务或等待完成后再删除",
+                "task_id": state.get("task_id"),
+            }
+        }), 409
+    try:
+        return ok(kb_service.delete_kb5())
     except ValidationError as e:
         return err(e.message, 400)
 
@@ -78,6 +101,16 @@ def kb5_list_inferences():
 
 @kb_bp.route("/api/kb/kb5/inferences/<inference_id>", methods=["DELETE"])
 def kb5_delete_inference(inference_id: str):
+    state = kb_service.get_kb5_state()
+    if state.get("in_use"):
+        return jsonify({
+            "ok": False,
+            "error": {
+                "code": "KB5_IN_USE",
+                "message": "KB5 正在被测试任务使用，请先停止任务或等待完成后再删除",
+                "task_id": state.get("task_id"),
+            }
+        }), 409
     if not kb_service.delete_inference(inference_id):
         return err("删除失败", 500)
     return ok()

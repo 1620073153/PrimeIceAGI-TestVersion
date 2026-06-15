@@ -6,6 +6,7 @@ import tempfile
 from unittest.mock import patch
 
 from data.kb_store import (
+    delete_kb5_file,
     delete_kb5_inference,
     ensure_seed_files,
     get_data_dir,
@@ -110,3 +111,45 @@ class TestKb5Consistency:
             assert deleted is True
             loaded_after_delete = load_kb5()
             assert loaded_after_delete["inferences"] == []
+
+    def test_load_kb5_reads_legacy_file_before_migration(self, tmp_path):
+        inferred = tmp_path / "kb5_inferred_boundaries.json"
+        inferred.write_text(json.dumps({
+            "inferences": [{"round": 3, "summary": "已有边界"}]
+        }, ensure_ascii=False), encoding="utf-8")
+
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            data = load_kb("kb5")
+
+        assert data["inferences"][0]["summary"] == "已有边界"
+        assert (tmp_path / "kb5.json").exists()
+
+    def test_delete_kb5_inference_removes_only_target_record(self, tmp_path):
+        inferred = tmp_path / "kb5_inferred_boundaries.json"
+        inferred.write_text(json.dumps({
+            "inferences": [
+                {"inference_id": "inf-001", "summary": "要删除"},
+                {"inference_id": "inf-002", "summary": "保留"},
+            ]
+        }, ensure_ascii=False), encoding="utf-8")
+
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            result = delete_kb5_inference("inf-001")
+            data = load_kb("kb5")
+
+        assert result is True
+        assert len(data["inferences"]) == 1
+        assert data["inferences"][0]["inference_id"] == "inf-002"
+
+    def test_delete_kb5_file_removes_legacy_and_canonical_files(self, tmp_path):
+        legacy = tmp_path / "kb5_inferred_boundaries.json"
+        canonical = tmp_path / "kb5.json"
+        legacy.write_text('{"inferences": []}', encoding="utf-8")
+        canonical.write_text('{"inferences": []}', encoding="utf-8")
+
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            status = delete_kb5_file()
+
+        assert status == "deleted"
+        assert not legacy.exists()
+        assert not canonical.exists()

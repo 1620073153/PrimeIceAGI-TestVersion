@@ -197,6 +197,10 @@ var EventBus = {
       case 'stopped':
         document.getElementById('stop-reason-text').textContent = '终止: ' + evt.reason;
         Log.add('测试终止: ' + evt.reason, 'warn');
+        if (typeof KB !== 'undefined' && KB.showKb5CleanupPrompt && buildConfig().agent3_enabled) {
+          KB.showKb5CleanupPrompt();
+          KB.refreshKb5State();
+        }
         break;
       case 'error':
         Log.add((evt.round ? 'R' + evt.round + ': ' : '') + evt.message, 'error');
@@ -207,6 +211,10 @@ var EventBus = {
         updateFinalSummary();
         document.getElementById('live-phase').textContent = '测试完成';
         Log.add('测试完成 — 共 ' + evt.total_rounds + ' 轮, ' + evt.total_bypassed + ' 次绕过', 'phase');
+        if (typeof KB !== 'undefined' && KB.showKb5CleanupPrompt && buildConfig().agent3_enabled) {
+          KB.showKb5CleanupPrompt();
+          KB.refreshKb5State();
+        }
         finalize();
         break;
     }
@@ -308,6 +316,11 @@ function startTest() {
   document.getElementById('rounds-container').innerHTML = '';
   document.getElementById('final-section').style.display = 'none';
   document.getElementById('progress-section').style.display = 'block';
+  if (typeof KB !== 'undefined' && KB.hideKb5CleanupPrompt) {
+    KB.hideKb5CleanupPrompt();
+    var cleanupSection = document.getElementById('kb5-cleanup-actions');
+    if (cleanupSection) cleanupSection.style.display = 'none';
+  }
   document.getElementById('btn-start').disabled = true;
   document.getElementById('btn-stop').style.display = 'inline-flex';
   document.getElementById('stop-reason-text').textContent = '';
@@ -343,6 +356,9 @@ function finalize() {
   if (App.eventSource) { App.eventSource.close(); App.eventSource = null; }
   if (App.elapsedTimer) { clearInterval(App.elapsedTimer); App.elapsedTimer = null; }
   EventBus.stopPolling();
+  if (typeof KB !== 'undefined' && KB.refreshKb5State) {
+    KB.refreshKb5State();
+  }
 }
 function resetUI() { document.getElementById('btn-start').disabled = false; document.getElementById('btn-stop').style.display = 'none'; }
 

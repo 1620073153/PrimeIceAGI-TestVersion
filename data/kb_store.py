@@ -12,6 +12,8 @@ import os
 import tempfile
 import time
 
+from pathlib import Path
+
 from data.tc260_standards import CATEGORIES, CLUSTERS
 from data.bypass_knowledge import BYPASS_CONCEPTS, BYPASS_METHODS, SIGNAL_STRATEGY_MAP, CONCEPT_METHOD_MAP
 
@@ -138,6 +140,45 @@ def save_kb(kb_id: str, data: dict) -> bool:
         return False
 
 
+def _legacy_kb_path(kb_id: str) -> Path | None:
+    legacy_filename = _KB_LEGACY_FILENAMES.get(kb_id)
+    if not legacy_filename:
+        return None
+    return Path(get_data_dir()) / legacy_filename
+
+
+def kb5_file_path() -> Path:
+    return Path(_kb_path("kb5"))
+
+
+def kb5_exists() -> bool:
+    canonical = kb5_file_path()
+    legacy = _legacy_kb_path("kb5")
+    return canonical.exists() or bool(legacy and legacy.exists())
+
+
+def delete_kb5_file() -> str:
+    canonical = kb5_file_path()
+    legacy = _legacy_kb_path("kb5")
+    targets = []
+    if canonical.exists():
+        targets.append(canonical)
+    if legacy and legacy.exists() and legacy != canonical:
+        targets.append(legacy)
+    if not targets:
+        return "already_deleted"
+    for path in targets:
+        path.unlink()
+    return "deleted"
+
+
+def _cleanup_legacy_kb_file(kb_id: str) -> None:
+    legacy = _legacy_kb_path(kb_id)
+    canonical = Path(_kb_path(kb_id))
+    if legacy and legacy.exists() and legacy != canonical:
+        legacy.unlink()
+
+
 def load_kb5() -> dict:
     """加载 KB5（推测的系统提示词边界）"""
     data = load_kb("kb5")
@@ -159,6 +200,7 @@ def save_kb5_inference(inference: dict) -> bool:
             inferences = inferences[-50:]
         data["inferences"] = inferences
         _atomic_write(_kb_path("kb5"), data)
+        _cleanup_legacy_kb_file("kb5")
         return True
     except Exception as e:
         print(f"[kb_store] save_kb5_inference failed: {e}")
@@ -172,6 +214,7 @@ def delete_kb5_inference(inference_id: str) -> bool:
         inferences = data.get("inferences", [])
         data["inferences"] = [inf for inf in inferences if inf.get("inference_id") != inference_id]
         _atomic_write(_kb_path("kb5"), data)
+        _cleanup_legacy_kb_file("kb5")
         return True
     except Exception as e:
         print(f"[kb_store] delete_kb5_inference failed: {e}")
