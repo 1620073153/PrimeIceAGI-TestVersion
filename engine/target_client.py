@@ -165,6 +165,11 @@ class TargetClient:
         headers = _render_template(self.template.get("headers", {}), variables)
         body = _render_template(self.template.get("body", {}), variables)
 
+        if "temperature" in self.config:
+            body["temperature"] = self.config["temperature"]
+        if "top_p" in self.config:
+            body["top_p"] = self.config["top_p"]
+
         return {
             "method": self.template.get("method", "POST"),
             "url": self._build_url(),

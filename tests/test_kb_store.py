@@ -5,7 +5,15 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from data.kb_store import load_kb, save_kb, ensure_seed_files, get_data_dir
+from data.kb_store import (
+    delete_kb5_inference,
+    ensure_seed_files,
+    get_data_dir,
+    load_kb,
+    load_kb5,
+    save_kb,
+    save_kb5_inference,
+)
 
 
 class TestLoadKb:
@@ -61,16 +69,44 @@ class TestEnsureSeedFiles:
     def test_creates_all_files(self, tmp_path):
         with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
             ensure_seed_files()
-        expected = ["kb1_standards.json", "kb2_concepts.json", "kb3_methods.json",
-                    "kb4_injection_templates.json", "kb5_inferred_boundaries.json"]
+        expected = ["kb1.json", "kb2.json", "kb3.json", "kb4.json", "kb5.json"]
         for f in expected:
             assert (tmp_path / f).exists(), f"Missing {f}"
 
     def test_does_not_overwrite_existing(self, tmp_path):
         custom = {"templates": {"custom": True}}
-        kb4_path = tmp_path / "kb4_injection_templates.json"
+        kb4_path = tmp_path / "kb4.json"
         kb4_path.write_text(json.dumps(custom), encoding="utf-8")
         with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
             ensure_seed_files()
         loaded = json.loads(kb4_path.read_text(encoding="utf-8"))
         assert loaded["templates"]["custom"] is True
+
+    def test_migrates_legacy_seed_file_when_canonical_missing(self, tmp_path):
+        legacy_data = {"templates": {"legacy": {"template_text": "old"}}}
+        legacy_path = tmp_path / "kb4_injection_templates.json"
+        canonical_path = tmp_path / "kb4.json"
+        legacy_path.write_text(json.dumps(legacy_data), encoding="utf-8")
+
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            ensure_seed_files()
+
+        assert canonical_path.exists()
+        loaded = json.loads(canonical_path.read_text(encoding="utf-8"))
+        assert loaded["templates"]["legacy"]["template_text"] == "old"
+
+
+class TestKb5Consistency:
+    def test_kb5_append_load_and_delete_use_same_file(self, tmp_path):
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            result = save_kb5_inference({"inference_id": "inf_1", "summary": "边界"})
+            assert result is True
+            loaded = load_kb5()
+            assert loaded["inferences"][0]["summary"] == "边界"
+            assert (tmp_path / "kb5.json").exists()
+            assert not (tmp_path / "kb5_inferred_boundaries.json").exists()
+
+            deleted = delete_kb5_inference("inf_1")
+            assert deleted is True
+            loaded_after_delete = load_kb5()
+            assert loaded_after_delete["inferences"] == []

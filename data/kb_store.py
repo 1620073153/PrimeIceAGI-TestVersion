@@ -1,10 +1,10 @@
 """
 知识库 JSON 持久化层
-kb_data/kb1_standards.json        — TC260-003 五大类三十一小类
-kb_data/kb2_concepts.json         — 9 个绕过概念
-kb_data/kb3_methods.json          — 12 种绕过方法 + 信号映射 + 概念方法映射
-kb_data/kb4_injection_templates.json — 用户高命中率注入模板 (初始空)
-kb_data/kb5_inferred_boundaries.json — Agent3 推测的系统提示词边界 (自动填充)
+kb_data/kb1.json — TC260-003 五大类三十一小类
+kb_data/kb2.json — 9 个绕过概念
+kb_data/kb3.json — 12 种绕过方法 + 信号映射 + 概念方法映射
+kb_data/kb4.json — 用户高命中率注入模板 (初始空)
+kb_data/kb5.json — Agent3 推测的系统提示词边界 (自动填充)
 """
 
 import json
@@ -14,6 +14,39 @@ import time
 
 from data.tc260_standards import CATEGORIES, CLUSTERS
 from data.bypass_knowledge import BYPASS_CONCEPTS, BYPASS_METHODS, SIGNAL_STRATEGY_MAP, CONCEPT_METHOD_MAP
+
+
+_KB_DEFAULTS = {
+    "kb1": lambda: {"categories": CATEGORIES, "clusters": CLUSTERS},
+    "kb2": lambda: {"concepts": BYPASS_CONCEPTS},
+    "kb3": lambda: {
+        "methods": BYPASS_METHODS,
+        "signal_strategy_map": SIGNAL_STRATEGY_MAP,
+        "concept_method_map": CONCEPT_METHOD_MAP,
+    },
+    "kb4": lambda: {"templates": {}},
+    "kb5": lambda: {"inferences": []},
+}
+
+_KB_LEGACY_FILENAMES = {
+    "kb1": "kb1_standards.json",
+    "kb2": "kb2_concepts.json",
+    "kb3": "kb3_methods.json",
+    "kb4": "kb4_injection_templates.json",
+    "kb5": "kb5_inferred_boundaries.json",
+}
+
+
+def _canonical_filename(kb_id: str) -> str:
+    return f"{kb_id}.json"
+
+
+def _kb_path(kb_id: str) -> str:
+    return os.path.join(get_data_dir(), _canonical_filename(kb_id))
+
+
+def _fallback_data(kb_id: str) -> dict:
+    return _KB_DEFAULTS.get(kb_id, lambda: {})()
 
 
 def get_data_dir() -> str:
@@ -35,27 +68,46 @@ def _atomic_write(filepath: str, data: dict):
         raise
 
 
+def _load_json_file(filepath: str) -> dict:
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _migrate_legacy_file(kb_id: str) -> bool:
+    data_dir = get_data_dir()
+    canonical_path = os.path.join(data_dir, _canonical_filename(kb_id))
+    if os.path.exists(canonical_path):
+        return True
+
+    legacy_filename = _KB_LEGACY_FILENAMES.get(kb_id)
+    if not legacy_filename:
+        return False
+
+    legacy_path = os.path.join(data_dir, legacy_filename)
+    if not os.path.exists(legacy_path):
+        return False
+
+    try:
+        data = _load_json_file(legacy_path)
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    _atomic_write(canonical_path, data)
+    return True
+
+
 def ensure_seed_files():
     """
-    首次启动时，从 Python 硬编码数据生成所有 5 个 JSON 种子文件。
-    如果文件已存在，不覆盖。
+    首次启动时，从 Python 硬编码数据生成所有 5 个权威 JSON 文件。
+    如果旧命名文件存在且新文件不存在，先迁移旧文件。
+    如果权威文件已存在，不覆盖。
     """
     data_dir = get_data_dir()
 
-    files_and_defaults = [
-        ("kb1_standards.json", lambda: {"categories": CATEGORIES, "clusters": CLUSTERS}),
-        ("kb2_concepts.json", lambda: {"concepts": BYPASS_CONCEPTS}),
-        ("kb3_methods.json", lambda: {
-            "methods": BYPASS_METHODS,
-            "signal_strategy_map": SIGNAL_STRATEGY_MAP,
-            "concept_method_map": CONCEPT_METHOD_MAP,
-        }),
-        ("kb4_injection_templates.json", lambda: {"templates": {}}),
-        ("kb5_inferred_boundaries.json", lambda: {"inferences": []}),
-    ]
-
-    for filename, get_default in files_and_defaults:
-        filepath = os.path.join(data_dir, filename)
+    for kb_id, get_default in _KB_DEFAULTS.items():
+        if _migrate_legacy_file(kb_id):
+            continue
+        filepath = os.path.join(data_dir, _canonical_filename(kb_id))
         if not os.path.exists(filepath):
             _atomic_write(filepath, get_default())
 
@@ -65,24 +117,13 @@ def load_kb(kb_id: str) -> dict:
     加载知识库 JSON，损坏或缺失时回退到 Python 模块数据。
     kb_id 可以是: kb1, kb2, kb3, kb4, kb5
     """
-    filename = f"{kb_id}.json"
-    filepath = os.path.join(get_data_dir(), filename)
-
-    fallback_map = {
-        "kb1": lambda: {"categories": CATEGORIES, "clusters": CLUSTERS},
-        "kb2": lambda: {"concepts": BYPASS_CONCEPTS},
-        "kb3": lambda: {"methods": BYPASS_METHODS, "signal_strategy_map": SIGNAL_STRATEGY_MAP, "concept_method_map": CONCEPT_METHOD_MAP},
-        "kb4": lambda: {"templates": {}},
-        "kb5": lambda: {"inferences": []},
-    }
-
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
+        _migrate_legacy_file(kb_id)
+        return _load_json_file(_kb_path(kb_id))
     except (FileNotFoundError, json.JSONDecodeError):
-        return fallback_map.get(kb_id, lambda: {})()
+        return _fallback_data(kb_id)
     except Exception:
-        return fallback_map.get(kb_id, lambda: {})()
+        return _fallback_data(kb_id)
 
 
 def save_kb(kb_id: str, data: dict) -> bool:
@@ -90,9 +131,7 @@ def save_kb(kb_id: str, data: dict) -> bool:
     if kb_id == "kb5":
         return False
     try:
-        filename = f"{kb_id}.json"
-        filepath = os.path.join(get_data_dir(), filename)
-        _atomic_write(filepath, data)
+        _atomic_write(_kb_path(kb_id), data)
         return True
     except Exception as e:
         print(f"[kb_store] save_kb({kb_id}) failed: {e}")
@@ -119,8 +158,7 @@ def save_kb5_inference(inference: dict) -> bool:
         if len(inferences) > 50:
             inferences = inferences[-50:]
         data["inferences"] = inferences
-        filepath = os.path.join(get_data_dir(), "kb5_inferred_boundaries.json")
-        _atomic_write(filepath, data)
+        _atomic_write(_kb_path("kb5"), data)
         return True
     except Exception as e:
         print(f"[kb_store] save_kb5_inference failed: {e}")
@@ -133,8 +171,7 @@ def delete_kb5_inference(inference_id: str) -> bool:
         data = load_kb5()
         inferences = data.get("inferences", [])
         data["inferences"] = [inf for inf in inferences if inf.get("inference_id") != inference_id]
-        filepath = os.path.join(get_data_dir(), "kb5_inferred_boundaries.json")
-        _atomic_write(filepath, data)
+        _atomic_write(_kb_path("kb5"), data)
         return True
     except Exception as e:
         print(f"[kb_store] delete_kb5_inference failed: {e}")
