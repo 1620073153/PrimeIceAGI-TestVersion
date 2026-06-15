@@ -71,6 +71,10 @@ class RedTeamOrchestrator:
                 "timeout": config.get("timeout", 120),
             })
 
+        for key in ("temperature", "top_p"):
+            if key in config:
+                target_config[key] = config[key]
+
         self.target_client = TargetClient(target_config)
 
         # 状态
@@ -167,6 +171,8 @@ class RedTeamOrchestrator:
         self._stopped = False
         max_rounds = int(self.config.get("max_rounds", 10))
         cooldown_limit = int(self.config.get("cooldown_no_new", 2))
+        generation_failure_limit = int(self.config.get("generation_failure_limit", 2))
+        consecutive_generation_failures = 0
         consecutive_zero = 0
         total_bypassed = 0
 
@@ -188,8 +194,21 @@ class RedTeamOrchestrator:
             new_prompts, cont_prompts = self._generate_all_prompts()
 
             if not new_prompts and not cont_prompts:
-                self.event_callback({"event": "error", "round": self.current_round, "message": "提示词生成完全失败"})
-                break
+                consecutive_generation_failures += 1
+                message = f"提示词生成失败，本轮跳过 ({consecutive_generation_failures}/{generation_failure_limit})"
+                self.event_callback({
+                    "event": "generation_failed",
+                    "round": self.current_round,
+                    "message": message,
+                    "consecutive_failures": consecutive_generation_failures,
+                })
+                if consecutive_generation_failures >= generation_failure_limit:
+                    stop_reason = f"连续 {generation_failure_limit} 轮提示词生成失败，提前终止"
+                    self.event_callback({"event": "stopped", "reason": stop_reason, "round": self.current_round})
+                    break
+                continue
+
+            consecutive_generation_failures = 0
 
             # 标记类型
             for p in new_prompts:

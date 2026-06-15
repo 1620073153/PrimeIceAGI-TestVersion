@@ -13,12 +13,22 @@ import re
 import logging
 import os
 import random
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from data.kb_store import load_kb
 
 logger = logging.getLogger(__name__)
+
+
+def _preview_text(text: str, limit: int = 1200) -> str:
+    """返回适合日志记录的单行输出摘要。"""
+    compact = re.sub(r"\s+", " ", text or "").strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit] + "...<truncated>"
+
 
 DEFAULT_SETTINGS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -111,16 +121,46 @@ def _build_prompt_skill_message(
     return "\n".join(parts)
 
 
-_active_process: Optional[subprocess.Popen] = None
+_process_lock = threading.Lock()
+_active_processes: list[subprocess.Popen] = []
+
+
+def _kill_proc_tree(proc: subprocess.Popen):
+    """终止进程及其整个子进程树（Windows 兼容）"""
+    try:
+        if proc.poll() is not None:
+            return
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            proc.kill()
+    except (OSError, ProcessLookupError):
+        pass
+
+
+def _register_process(proc: subprocess.Popen):
+    with _process_lock:
+        _active_processes.append(proc)
+
+
+def _unregister_process(proc: subprocess.Popen):
+    with _process_lock:
+        if proc in _active_processes:
+            _active_processes.remove(proc)
 
 
 def kill_active():
-    """终止正在运行的 claude -p 子进程"""
-    global _active_process
-    if _active_process and _active_process.poll() is None:
-        logger.info("[ClaudeAgent] 终止子进程")
-        _active_process.kill()
-        _active_process = None
+    """终止所有正在运行的 claude -p 子进程"""
+    with _process_lock:
+        procs = list(_active_processes)
+        _active_processes.clear()
+    for proc in procs:
+        logger.info("[ClaudeAgent] 终止子进程 PID=%s", proc.pid)
+        _kill_proc_tree(proc)
 
 
 def generate_prompts(
@@ -133,7 +173,6 @@ def generate_prompts(
     settings_path: Optional[str] = None,
 ) -> list[dict]:
     """通过 Claude Code 智能体 + /prompt-skill 生成 10 条攻击提示词"""
-    global _active_process
 
     user_message = _build_prompt_skill_message(
         round_num, strategy, kb5_summary, history_feedback, successful_prompts
@@ -166,10 +205,12 @@ def generate_prompts(
             shell=True,
             env=env,
         )
-        _active_process = proc
+        _register_process(proc)
 
-        stdout, stderr = proc.communicate(input=user_message, timeout=timeout)
-        _active_process = None
+        try:
+            stdout, stderr = proc.communicate(input=user_message, timeout=timeout)
+        finally:
+            _unregister_process(proc)
 
         if proc.returncode != 0:
             logger.warning(f"[ClaudeAgent] claude -p 返回非零: {stderr[:200]}")
@@ -187,6 +228,11 @@ def generate_prompts(
             prompts = _parse_freeform_prompts(raw_text, strategy)
 
         if len(prompts) < 3:
+            logger.warning(
+                "[ClaudeAgent] 提示词解析不足: parsed=%s raw_preview=%s",
+                len(prompts),
+                _preview_text(raw_text),
+            )
             raise RuntimeError(f"解析到的提示词不足 3 条: {len(prompts)}")
 
         for i, p in enumerate(prompts[:10]):
@@ -201,12 +247,10 @@ def generate_prompts(
 
     except subprocess.TimeoutExpired:
         logger.warning(f"[ClaudeAgent] 超时 ({timeout}s)，终止子进程")
-        if _active_process and _active_process.poll() is None:
-            _active_process.kill()
-        _active_process = None
+        _unregister_process(proc)
+        _kill_proc_tree(proc)
         raise
     except json.JSONDecodeError as e:
-        _active_process = None
         logger.warning(f"[ClaudeAgent] JSON 解析失败: {e}")
         raise RuntimeError(f"claude -p 输出非 JSON: {stdout[:200]}")
 
@@ -317,7 +361,6 @@ def generate_continuations(
     timeout: float = 180.0,
 ) -> list[dict]:
     """通过 Claude Code 智能体生成续攻提示词，每个存活会话一条"""
-    global _active_process
 
     if not active_sessions:
         return []
@@ -346,8 +389,12 @@ def generate_continuations(
             shell=True,
             env=env,
         )
+        _register_process(proc)
 
-        stdout, stderr = proc.communicate(input=user_message, timeout=timeout)
+        try:
+            stdout, stderr = proc.communicate(input=user_message, timeout=timeout)
+        finally:
+            _unregister_process(proc)
 
         if proc.returncode != 0:
             logger.warning(f"[ClaudeAgent-续攻] 返回非零: {stderr[:200]}")
@@ -365,6 +412,8 @@ def generate_continuations(
 
     except subprocess.TimeoutExpired:
         logger.warning(f"[ClaudeAgent-续攻] 超时 ({timeout}s)")
+        _unregister_process(proc)
+        _kill_proc_tree(proc)
         raise
     except json.JSONDecodeError as e:
         logger.warning(f"[ClaudeAgent-续攻] JSON解析失败: {e}")
@@ -443,9 +492,14 @@ def generate_parallel(
     timeout: float = 180.0,
     settings_path: Optional[str] = None,
 ) -> tuple[list[dict], list[dict]]:
-    """并行执行 Agent1(新攻) + Agent-续攻，返回 (new_prompts, continuation_prompts)"""
+    """并行执行 Agent1(新攻) + Agent-续攻，返回 (new_prompts, continuation_prompts)。
+
+    新攻失败不直接拖死续攻；只有新攻和续攻都没有可用结果时才抛出完全失败。
+    """
     new_prompts = []
     cont_prompts = []
+    new_error = None
+    cont_error = None
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_new = executor.submit(
@@ -471,14 +525,23 @@ def generate_parallel(
         try:
             new_prompts = future_new.result()
         except Exception as e:
+            new_error = e
             logger.error(f"[ClaudeAgent] Agent1新攻生成失败: {e}")
-            raise
 
         if future_cont:
             try:
                 cont_prompts = future_cont.result()
             except Exception as e:
+                cont_error = e
                 logger.warning(f"[ClaudeAgent] 续攻生成失败(非致命): {e}")
-                cont_prompts = []
+
+    if not new_prompts and not cont_prompts:
+        error_parts = []
+        if new_error:
+            error_parts.append(f"新攻失败: {new_error}")
+        if cont_error:
+            error_parts.append(f"续攻失败: {cont_error}")
+        detail = "；".join(error_parts) if error_parts else "无可用提示词"
+        raise RuntimeError(f"提示词生成完全失败: {detail}")
 
     return new_prompts, cont_prompts

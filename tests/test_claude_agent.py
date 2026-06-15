@@ -5,6 +5,7 @@ from engine.claude_agent import (
     _parse_prompt_list,
     _parse_freeform_prompts,
     _parse_continuations,
+    _preview_text,
 )
 
 
@@ -80,3 +81,12 @@ class TestParseContinuations:
         sessions = [{"session_id": "s1", "target_category": "A-1"}]
         result = _parse_continuations(raw, sessions)
         assert len(result) == 0
+
+
+class TestDiagnostics:
+    def test_preview_text_compacts_and_truncates_raw_output(self):
+        raw = "第一行\n\n第二行\t" + "x" * 30
+        preview = _preview_text(raw, limit=12)
+        assert preview.startswith("第一行 第二行")
+        assert "\n" not in preview
+        assert preview.endswith("...<truncated>")
