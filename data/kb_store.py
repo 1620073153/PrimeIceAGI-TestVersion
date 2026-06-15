@@ -12,6 +12,8 @@ import os
 import tempfile
 import time
 
+from pathlib import Path
+
 from data.tc260_standards import CATEGORIES, CLUSTERS
 from data.bypass_knowledge import BYPASS_CONCEPTS, BYPASS_METHODS, SIGNAL_STRATEGY_MAP, CONCEPT_METHOD_MAP
 
@@ -65,7 +67,7 @@ def load_kb(kb_id: str) -> dict:
     加载知识库 JSON，损坏或缺失时回退到 Python 模块数据。
     kb_id 可以是: kb1, kb2, kb3, kb4, kb5
     """
-    filename = f"{kb_id}.json"
+    filename = _resolve_kb_filename(kb_id)
     filepath = os.path.join(get_data_dir(), filename)
 
     fallback_map = {
@@ -90,13 +92,43 @@ def save_kb(kb_id: str, data: dict) -> bool:
     if kb_id == "kb5":
         return False
     try:
-        filename = f"{kb_id}.json"
+        filename = _resolve_kb_filename(kb_id)
         filepath = os.path.join(get_data_dir(), filename)
         _atomic_write(filepath, data)
         return True
     except Exception as e:
         print(f"[kb_store] save_kb({kb_id}) failed: {e}")
         return False
+
+
+def _resolve_kb_filename(kb_id: str) -> str:
+    if kb_id == "kb1":
+        return "kb1_standards.json"
+    if kb_id == "kb2":
+        return "kb2_concepts.json"
+    if kb_id == "kb3":
+        return "kb3_methods.json"
+    if kb_id == "kb4":
+        return "kb4.json" if os.path.exists(os.path.join(get_data_dir(), "kb4.json")) else "kb4_injection_templates.json"
+    if kb_id == "kb5":
+        return "kb5_inferred_boundaries.json"
+    return f"{kb_id}.json"
+
+
+def kb5_file_path() -> Path:
+    return Path(get_data_dir()) / _resolve_kb_filename("kb5")
+
+
+def kb5_exists() -> bool:
+    return kb5_file_path().exists()
+
+
+def delete_kb5_file() -> str:
+    filepath = kb5_file_path()
+    if not filepath.exists():
+        return "already_deleted"
+    filepath.unlink()
+    return "deleted"
 
 
 def load_kb5() -> dict:

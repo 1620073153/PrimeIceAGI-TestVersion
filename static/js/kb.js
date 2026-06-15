@@ -7,6 +7,7 @@
 var KB = {
   currentId: 'kb1',
   modalCb: null,
+  kb5State: null,
   NAMES: {
     kb1: 'TC260-003 安全标准',
     kb2: '绕过概念库',
@@ -30,6 +31,11 @@ var KB = {
     KB.currentId = id;
     document.getElementById('kb-add-btn').style.display = id === 'kb5' ? 'none' : 'inline-flex';
     document.getElementById('kb-meta').textContent = KB.NAMES[id] || id;
+    KB.toggleKb5Controls(id === 'kb5');
+    if (id === 'kb5') {
+      KB.refreshKb5State().finally(function () { KB.loadData(); });
+      return;
+    }
     KB.loadData();
   },
 
@@ -39,6 +45,78 @@ var KB = {
       .then(function (r) { return r.json(); })
       .then(function (resp) { KB.renderEntries(resp.data || resp); })
       .catch(function (e) { ct.innerHTML = '加载失败: ' + e.message; });
+  },
+
+  toggleKb5Controls: function (active) {
+    var btn = document.getElementById('kb5-delete-btn');
+    var hint = document.getElementById('kb5-delete-hint');
+    if (!btn || !hint) return;
+    btn.style.display = active ? 'inline-flex' : 'none';
+    hint.style.display = active ? 'block' : 'none';
+    if (!active) {
+      hint.textContent = '';
+    }
+  },
+
+  refreshKb5State: function () {
+    return fetch('/api/kb/kb5')
+      .then(function (r) { return r.json(); })
+      .then(function (resp) {
+        var data = resp.data || {};
+        KB.kb5State = data;
+        var hint = document.getElementById('kb5-delete-hint');
+        if (!hint) return data;
+        if (data.in_use) {
+          hint.textContent = 'KB5 正在被任务 ' + (data.task_id || '') + ' 使用中，请先停止任务或等待完成后再删除。';
+          document.getElementById('kb5-delete-btn').disabled = true;
+        } else {
+          hint.textContent = data.exists ? '可直接删除 KB5，测试结束后也可在结果区清理。' : 'KB5 当前不存在，可等待系统自动重建。';
+          document.getElementById('kb5-delete-btn').disabled = false;
+        }
+        return data;
+      })
+      .catch(function () { return null; });
+  },
+
+  openKb5DeleteModal: function () {
+    document.getElementById('kb5-delete-modal').classList.add('active');
+  },
+
+  closeKb5DeleteModal: function () {
+    document.getElementById('kb5-delete-modal').classList.remove('active');
+  },
+
+  deleteKb5: function () {
+    return fetch('/api/kb/kb5', { method: 'DELETE' })
+      .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+      .then(function (res) {
+        if (!res.data.ok) {
+          var msg = (res.data.error && res.data.error.message) || res.data.error || '删除失败';
+          toast(msg, 'error');
+          return false;
+        }
+        toast('KB5 已删除', 'success');
+        KB.closeKb5DeleteModal();
+        KB.refreshKb5State();
+        KB.loadData();
+        return true;
+      })
+      .catch(function () { toast('删除 KB5 失败', 'error'); return false; });
+  },
+
+  showKb5CleanupPrompt: function () {
+    var banner = document.getElementById('kb5-cleanup-banner');
+    var section = document.getElementById('kb5-cleanup-actions');
+    if (banner) banner.style.display = 'flex';
+    if (section) {
+      section.style.display = 'block';
+      document.getElementById('kb5-cleanup-hint').textContent = '本次测试已完成，可点击按钮清理 KB5。';
+    }
+  },
+
+  hideKb5CleanupPrompt: function () {
+    var banner = document.getElementById('kb5-cleanup-banner');
+    if (banner) banner.style.display = 'none';
   },
 
   renderEntries: function (data) {
@@ -103,6 +181,10 @@ var KB = {
       delBtn.addEventListener('click', (function (key) {
         return function () { KB.deleteEntry(key); };
       })(e.key));
+      if (KB.currentId === 'kb5' && KB.kb5State && KB.kb5State.in_use) {
+        delBtn.disabled = true;
+        delBtn.title = 'KB5 正在被测试任务使用，请先停止任务或等待完成后再删除';
+      }
       actions.appendChild(delBtn);
 
       entry.appendChild(info);
@@ -151,8 +233,17 @@ var KB = {
     fetch(ep, { method: 'DELETE' })
       .then(function (r) {
         if (r.ok) { toast('已删除', 'success'); KB.loadData(); }
-        else r.json().then(function (e) { toast(e.error || '删除失败', 'error'); });
+        else r.json().then(function (e) { toast((e.error && e.error.message) || e.error || '删除失败', 'error'); });
       });
+  },
+
+  deleteKb5EntryPoint: function () {
+    var state = KB.kb5State || {};
+    if (state.in_use) {
+      toast('KB5 正在被测试任务使用，请先停止任务或等待完成后再删除', 'error');
+      return;
+    }
+    KB.openKb5DeleteModal();
   },
   openModal: function (title, data, cb, editKey) {
     document.getElementById('kb-modal-title').textContent = title;
@@ -257,5 +348,20 @@ document.addEventListener('DOMContentLoaded', function () {
   // 模态框取消按钮
   document.getElementById('kb-modal-cancel').addEventListener('click', function () {
     KB.closeModal();
+  });
+  document.getElementById('kb5-delete-btn').addEventListener('click', function () {
+    KB.deleteKb5EntryPoint();
+  });
+  document.getElementById('kb5-delete-cancel').addEventListener('click', function () {
+    KB.closeKb5DeleteModal();
+  });
+  document.getElementById('kb5-delete-confirm').addEventListener('click', function () {
+    KB.deleteKb5();
+  });
+  document.getElementById('kb5-banner-action').addEventListener('click', function () {
+    KB.deleteKb5EntryPoint();
+  });
+  document.getElementById('kb5-cleanup-btn').addEventListener('click', function () {
+    KB.deleteKb5EntryPoint();
   });
 });

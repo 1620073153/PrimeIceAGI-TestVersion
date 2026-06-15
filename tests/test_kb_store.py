@@ -5,7 +5,7 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from data.kb_store import load_kb, save_kb, ensure_seed_files, get_data_dir
+from data.kb_store import load_kb, save_kb, ensure_seed_files, get_data_dir, save_kb5_inference, delete_kb5_inference
 
 
 class TestLoadKb:
@@ -74,3 +74,46 @@ class TestEnsureSeedFiles:
             ensure_seed_files()
         loaded = json.loads(kb4_path.read_text(encoding="utf-8"))
         assert loaded["templates"]["custom"] is True
+
+
+class TestKb5Cleanup:
+    def test_save_kb5_inference_persists_to_inferred_boundaries_file(self, tmp_path):
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            result = save_kb5_inference({
+                "round": 1,
+                "summary": "边界摘要",
+                "target_model": "demo-model",
+                "failed_count": 2,
+            })
+
+        assert result is True
+        persisted = json.loads((tmp_path / "kb5_inferred_boundaries.json").read_text(encoding="utf-8"))
+        assert persisted["inferences"][0]["summary"] == "边界摘要"
+
+    def test_load_kb5_reads_inferred_boundaries_file(self, tmp_path):
+        inferred = tmp_path / "kb5_inferred_boundaries.json"
+        inferred.write_text(json.dumps({
+            "inferences": [{"round": 3, "summary": "已有边界"}]
+        }, ensure_ascii=False), encoding="utf-8")
+
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            data = load_kb("kb5")
+
+        assert data["inferences"][0]["summary"] == "已有边界"
+
+    def test_delete_kb5_inference_removes_only_target_record(self, tmp_path):
+        inferred = tmp_path / "kb5_inferred_boundaries.json"
+        inferred.write_text(json.dumps({
+            "inferences": [
+                {"inference_id": "inf-001", "summary": "要删除"},
+                {"inference_id": "inf-002", "summary": "保留"},
+            ]
+        }, ensure_ascii=False), encoding="utf-8")
+
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            result = delete_kb5_inference("inf-001")
+            data = load_kb("kb5")
+
+        assert result is True
+        assert len(data["inferences"]) == 1
+        assert data["inferences"][0]["inference_id"] == "inf-002"
