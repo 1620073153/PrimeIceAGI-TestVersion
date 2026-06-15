@@ -52,6 +52,10 @@ def probe_target():
         body_str = body_str.replace("{{model}}", model)
         body_str = body_str.replace("{{prompt}}", "Hello, this is a connectivity test.")
         body = json.loads(body_str)
+        if "temperature" in data:
+            body["temperature"] = data["temperature"]
+        if "top_p" in data:
+            body["top_p"] = data["top_p"]
 
     try:
         if method.upper() == "GET":
