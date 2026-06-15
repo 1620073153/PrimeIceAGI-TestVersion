@@ -60,6 +60,10 @@ def create_app() -> Flask:
     def index():
         return render_template("index.html")
 
+    @app.route("/batch")
+    def batch_eval_page():
+        return render_template("batch.html")
+
     return app
 
 
@@ -69,7 +73,19 @@ app = create_app()
 if __name__ == "__main__":
     ensure_seed_files()
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5020
+
+    # 将 PID 写入文件，供 start.bat 精确终止本进程
+    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_pid")
+    with open(pid_file, "w") as f:
+        f.write(str(os.getpid()))
+
     print(f"\n  ◆ PrimeIceAGI v2 — 大模型内容安全红队自动化测试平台")
     print(f"  ◆ 前端页面: http://localhost:{port}")
     print(f"  ◆ API 端点: http://localhost:{port}/api/health\n")
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    try:
+        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    finally:
+        try:
+            os.remove(pid_file)
+        except OSError:
+            pass

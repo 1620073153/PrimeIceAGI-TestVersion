@@ -274,6 +274,10 @@ function buildConfig() {
     agent2_enabled: document.getElementById('agent2_enabled').value === 'true',
     guardrail_keywords: document.getElementById('guardrail_keywords').value.trim()
   };
+  var temperature = parseFloat(document.getElementById('target_temperature').value);
+  if (!isNaN(temperature)) cfg.temperature = temperature;
+  var topP = parseFloat(document.getElementById('target_top_p').value);
+  if (!isNaN(topP)) cfg.top_p = topP;
   if (tn === 'custom') {
     cfg.method = document.getElementById('custom_method').value;
     cfg.timeout = parseInt(document.getElementById('custom_timeout').value) || 120;
@@ -288,7 +292,10 @@ function buildConfig() {
 function probeTarget() {
   var s = document.getElementById('probe-status'); s.textContent = '检测中...';
   var cfg = buildConfig();
-  fetch('/api/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_url: cfg.target_api_url, api_key: cfg.target_api_key, model: cfg.target_model, template_name: cfg.template_name, method: cfg.method, headers: cfg.headers, body: cfg.body }) })
+  var probeBody = { api_url: cfg.target_api_url, api_key: cfg.target_api_key, model: cfg.target_model, template_name: cfg.template_name, method: cfg.method, headers: cfg.headers, body: cfg.body };
+  if (cfg.temperature !== undefined) probeBody.temperature = cfg.temperature;
+  if (cfg.top_p !== undefined) probeBody.top_p = cfg.top_p;
+  fetch('/api/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(probeBody) })
     .then(function (r) { return r.json(); })
     .then(function (d) { s.textContent = d.reachable ? '可达 (HTTP ' + d.status_code + ')' : (d.error || '不可达'); s.style.color = d.reachable ? 'var(--success)' : 'var(--danger)'; })
     .catch(function () { s.textContent = '请求失败'; s.style.color = 'var(--danger)'; });

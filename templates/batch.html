@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PrimeIceAGI — 批量评估模式</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>PrimeIceAGI</h1>
+    <div class="subtitle">Batch Evaluation Workspace</div>
+    <a class="btn btn-ghost btn-sm" href="/">返回测试中心</a>
+    <button class="theme-toggle" title="切换主题">&#9790;</button>
+  </header>
+
+  <div class="card">
+    <div class="card-title"><span class="icon" style="background:var(--accent-dim);color:var(--accent)">&#9638;</span> 批量评估配置</div>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>数据集路径</label>
+        <textarea id="batch_dataset_paths" placeholder="F:/datasets/cases.csv&#10;F:/datasets/cases-2.xlsx"></textarea>
+        <span class="hint">支持 CSV / XLSX，每行一个具体文件路径，不支持只填目录。推荐字段：用例编号/类别名称/子类型/测试内容（必填）。</span>
+      </div>
+      <div class="form-group full">
+        <label>排除类别</label>
+        <input id="batch_exclude_categories" placeholder="涉政, 金融, A类">
+        <span class="hint">逗号分隔，用于跳过不参与本次统计的类别。</span>
+      </div>
+      <div class="form-group"><label>Workers</label><input id="batch_workers" type="number" min="1" max="32" value="1"></div>
+      <div class="form-group"><label>Repeat</label><input id="batch_repeat" type="number" min="1" max="20" value="1"></div>
+      <div class="form-group"><label>Sleep 秒数</label><input id="batch_sleep_seconds" type="number" min="0" max="60" step="0.1" value="0"></div>
+      <div class="form-group"><label>Retries</label><input id="batch_retries" type="number" min="0" max="10" value="0"></div>
+      <div class="form-group"><label>断点续跑</label><select id="batch_resume"><option value="true" selected>开启</option><option value="false">关闭</option></select></div>
+      <div class="form-group"><label>启用裁判</label><select id="batch_enable_llm_judge"><option value="true" selected>开启</option><option value="false">关闭</option></select></div>
+      <div class="form-group full"><label>输出文件名</label><input id="batch_output_file" value="batch-report.xlsx" placeholder="batch-report.xlsx"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="batch-btn-start">启动批量评估</button>
+      <button class="btn btn-danger" id="batch-btn-stop" style="display:none">终止任务</button>
+      <span id="batch-run-hint" class="hint">该页面独立于探索模式，仅用于数据集驱动的单轮统计评测。</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon" style="background:var(--purple-dim);color:var(--purple)">&#9673;</span> 目标模型配置</div>
+    <div class="form-grid">
+      <div class="form-group"><label>API 模板</label><select id="template_name"><option value="openai_compatible">OpenAI 兼容格式</option><option value="anthropic_compatible">Anthropic 兼容格式</option><option value="custom">自定义模板</option></select></div>
+      <div class="form-group"><label>API 地址</label><input id="target_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"></div>
+      <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="target_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="target_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+      <div class="form-group"><label>模型名</label><input id="target_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
+      <div class="form-group"><label>Temperature</label><input id="target_temperature" type="number" min="0" max="2" step="0.1" placeholder="0.7"></div>
+      <div class="form-group"><label>Top P</label><input id="target_top_p" type="number" min="0" max="1" step="0.05" placeholder="1.0"></div>
+      <div class="form-group full"><label>自定义 Headers (JSON)</label><textarea id="custom_headers" placeholder='{"Authorization":"Bearer {{api_key}}"}'></textarea></div>
+      <div class="form-group full"><label>自定义 Body (JSON)</label><textarea id="custom_body" placeholder='{"model":"{{model}}","messages":[{"role":"user","content":"{{prompt}}"}]}'></textarea></div>
+      <div class="form-group"><label>自定义 Method</label><select id="custom_method"><option value="POST">POST</option><option value="GET">GET</option></select></div>
+      <div class="form-group"><label>超时 (秒)</label><input id="custom_timeout" type="number" value="120" min="10" max="600"></div>
+      <div class="form-group"><label>内容路径</label><input id="custom_content_path" placeholder="choices.0.message.content"></div>
+      <div class="form-group"><label>思考路径</label><input id="custom_reasoning_path" placeholder="choices.0.message.reasoning_content"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon" style="background:var(--success-dim);color:var(--success)">&#9671;</span> 裁判模型配置</div>
+    <div class="form-grid">
+      <div class="form-group"><label>API 地址</label><input id="agent_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"></div>
+      <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="agent_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="agent_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+      <div class="form-group"><label>模型名</label><input id="agent_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
+    </div>
+  </div>
+
+  <div class="card" id="batch-progress-card" style="display:none">
+    <div class="card-title"><span class="icon" style="background:var(--warning-dim);color:var(--warning)">&#8987;</span> 运行进度</div>
+    <div class="summary-grid">
+      <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-status-text">待启动</div><div class="tile-label">任务状态</div></div>
+      <div class="summary-tile"><div class="tile-val tile-green" id="batch-processed-count">0</div><div class="tile-label">已处理样本</div></div>
+      <div class="summary-tile"><div class="tile-val tile-purple" id="batch-skipped-count">0</div><div class="tile-label">跳过样本</div></div>
+      <div class="summary-tile"><div class="tile-val" id="batch-task-id">-</div><div class="tile-label">任务 ID</div></div>
+    </div>
+    <div class="chart-box" style="margin-bottom:16px">
+      <h4>运行日志</h4>
+      <div class="log-stream" id="batch-log-stream" style="max-height:260px"></div>
+    </div>
+    <div class="chart-box" style="margin-bottom:16px">
+      <h4>完成进度</h4>
+      <div class="summary-grid" style="margin-bottom:16px">
+        <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-progress-percent">0%</div><div class="tile-label">完成进度</div></div>
+        <div class="summary-tile"><div class="tile-val tile-green" id="batch-current-case">-</div><div class="tile-label">当前样本</div></div>
+        <div class="summary-tile"><div class="tile-val tile-purple" id="batch-last-result">-</div><div class="tile-label">最近结论</div></div>
+        <div class="summary-tile"><div class="tile-val" id="batch-last-reason">-</div><div class="tile-label">最近理由</div></div>
+      </div>
+      <div class="hint" id="batch-progress-meta">总样本 - ｜ 已处理 - ｜ 需复核 -</div>
+    </div>
+    <div class="chart-box" id="batch-report-box" style="display:none">
+      <h4>结果概览</h4>
+      <div class="summary-grid" style="margin-bottom:16px">
+        <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-total-count">0</div><div class="tile-label">总样本</div></div>
+        <div class="summary-tile"><div class="tile-val tile-green" id="batch-review-count">0</div><div class="tile-label">需人工复核</div></div>
+        <div class="summary-tile"><div class="tile-val tile-purple" id="batch-last-intercept">-</div><div class="tile-label">最近结论</div></div>
+        <div class="summary-tile"><div class="tile-val" id="batch-last-category">-</div><div class="tile-label">最近类别</div></div>
+      </div>
+      <div class="kb-list" id="batch-report-badges"></div>
+      <div class="chart-box" style="margin-top:16px">
+        <h4>最近结果</h4>
+        <div id="batch-recent-results" class="hint">任务完成后显示最近 10 条样本结论。</div>
+      </div>
+      <div class="actions" style="margin-top:12px;padding-top:12px">
+        <a class="btn btn-primary btn-sm" id="batch-download-report" href="#" target="_blank" rel="noopener">下载 XLSX 报告</a>
+        <span class="hint" id="batch-report-path"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon" style="background:var(--accent-dim);color:var(--accent)">&#9733;</span> 历史任务</div>
+    <div class="hint" style="margin-bottom:12px">支持查看历史任务的运行时间、数据集来源、处理摘要，并可快速查看摘要或下载历史报告。</div>
+    <div class="actions" style="margin-bottom:12px;padding-top:0">
+      <span class="hint">运行时间</span>
+      <span class="hint">查看摘要</span>
+    </div>
+    <div id="batch-history-list" class="kb-list"></div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/batch.js') }}"></script>
+</body>
+</html>

@@ -11,6 +11,7 @@
   <header>
     <h1>PrimeIceAGI</h1>
     <div class="subtitle">LLM Content Security Red-Team Automation</div>
+    <a class="btn btn-ghost btn-sm" href="/batch">批量评估模式</a>
     <button class="theme-toggle" title="切换主题">&#9790;</button>
   </header>
 
@@ -73,6 +74,8 @@
           <div class="form-group"><label>续攻模式</label><select id="allow_continuation"><option value="true" selected>开启</option><option value="false">关闭</option></select><span class="hint">对成功会话生成续攻</span></div>
           <div class="form-group"><label>边界分析</label><select id="agent3_enabled"><option value="true" selected>开启</option><option value="false">关闭</option></select><span class="hint">分析失败响应推测边界</span></div>
           <div class="form-group"><label>响应裁判</label><select id="agent2_enabled"><option value="true" selected>开启</option><option value="false">关闭</option></select><span class="hint">LLM二次判定是否真绕过</span></div>
+          <div class="form-group"><label>Temperature</label><input id="target_temperature" type="number" min="0" max="2" step="0.1" placeholder="0.7"><span class="hint">控制输出随机性，越高越多样，留空用模板默认</span></div>
+          <div class="form-group"><label>Top P</label><input id="target_top_p" type="number" min="0" max="1" step="0.05" placeholder="1.0"><span class="hint">核采样阈值，限制候选词累积概率，与 Temperature 二选一</span></div>
           <div class="form-group full"><label>护栏拦截关键词</label><input id="guardrail_keywords" placeholder="denyMessage,blockedDetails" value=""><span class="hint">逗号分隔，命中直接毙掉会话</span></div>
         </div>
       </div>
