@@ -72,7 +72,15 @@ for /f "delims=" %%v in ('call npm --version 2^>^&1') do set "NPM_VERSION=%%v"
 echo         OK: npm !NPM_VERSION!
 
 call claude --version >nul 2>&1
-if errorlevel 1 goto :missing_claude
+if not errorlevel 1 goto :claude_ok
+if exist "%AppData%\npm\claude.cmd" (
+    set "PATH=%AppData%\npm;%PATH%"
+    call claude --version >nul 2>&1
+    if not errorlevel 1 goto :claude_ok
+)
+goto :missing_claude
+
+:claude_ok
 for /f "delims=" %%v in ('call claude --version 2^>^&1') do set "CLAUDE_VERSION=%%v"
 echo         OK: Claude Code CLI !CLAUDE_VERSION!
 
@@ -163,9 +171,9 @@ goto :fail
 
 :missing_python
 echo.
-echo   [错误] 未找到 Python。
-echo   请安装 Python 3.9+，并勾选 Add python.exe to PATH。
-echo   下载地址: https://www.python.org/downloads/
+echo   [ERROR] Python not found.
+echo   Install Python 3.10+, enable "Add python.exe to PATH".
+echo   Download: https://www.python.org/downloads/
 goto :fail
 
 :python_too_old
@@ -216,12 +224,19 @@ goto :fail
 
 :missing_claude
 echo.
-echo   [错误] 未找到 Claude Code CLI，提示词生成智能体依赖此工具。
-echo   安装命令:
-echo   npm install -g @anthropic-ai/claude-code
+echo   [ERROR] Claude Code CLI not found (prompt-generation agent requires it).
+echo   NOTE: It may be installed but not in current CMD PATH.
 echo.
-echo   安装后请重新打开一个命令行窗口，确认以下命令可用:
-echo   claude --version
+echo   Common fix: reopen Command Prompt after installing Claude CLI,
+echo   or add npm global bin directory to PATH:
+echo     %%AppData%%\npm
+echo.
+echo   Diagnostic commands (run in a NEW Command Prompt):
+echo     where claude
+echo     %%AppData%%\npm\claude.cmd --version
+echo.
+echo   Install command:
+echo     npm install -g @anthropic-ai/claude-code
 goto :fail
 
 :port_maybe_existing
@@ -249,7 +264,7 @@ goto :fail
 
 :fail
 echo.
-echo   启动未完成。请按提示处理后重新双击 start.bat。
+echo   Startup did not complete. Fix the issue above, then re-run start.bat.
 pause
 endlocal
 exit /b 1

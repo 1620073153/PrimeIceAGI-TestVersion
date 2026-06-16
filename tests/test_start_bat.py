@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -68,3 +69,28 @@ def test_gitignore_keeps_local_claude_template_but_ignores_runtime_state():
     assert "!config/agent_home/.claude/CLAUDE.md" in content
     assert "!config/agent_home/.claude/skills/prompt-skill/SKILL.md" in content
     assert "config/agent_home/.claude/telemetry/" in content
+
+
+def test_missing_claude_label_avoids_cjk_chars():
+    content = START_BAT.read_text(encoding="utf-8")
+
+    head = content.split(":missing_claude", 1)
+    assert len(head) == 2, "start.bat must contain :missing_claude label"
+    block = head[1].split("\ngoto :", 1)[0].split("\n:")[0]
+
+    cjk = re.findall(r"[\u4e00-\u9fff]", block)
+    assert not cjk, f"missing_claude block must not contain CJK chars, found: {cjk}"
+
+
+def test_missing_claude_label_suggests_npm_global_or_appdata():
+    content = START_BAT.read_text(encoding="utf-8")
+
+    assert "npm install -g @anthropic-ai/claude-code" in content
+    assert "where claude" in content
+    assert "%AppData%" in content
+
+
+def test_start_bat_fallbacks_to_appdata_when_claude_missing_from_path():
+    content = START_BAT.read_text(encoding="utf-8")
+
+    assert 'claude.cmd' in content
