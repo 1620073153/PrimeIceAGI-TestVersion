@@ -33,10 +33,10 @@ call :ensure_project_file "app.py" "项目入口 app.py"
 call :ensure_project_file "requirements.txt" "Python 依赖 requirements.txt"
 if "%CHECK_FAILED%"=="1" goto :missing_requirements
 
-echo   [1/6] 检查 Python 3.9+ ...
+echo   [1/6] 检查 Python 3.10+ ...
 call :find_python
 if not defined PYTHON_CMD goto :missing_python
-%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1
+%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 goto :python_too_old
 for /f "delims=" %%v in ('%PYTHON_CMD% --version 2^>^&1') do set "PYTHON_VERSION=%%v"
 echo         OK: !PYTHON_VERSION!
@@ -77,10 +77,10 @@ for /f "delims=" %%v in ('call claude --version 2^>^&1') do set "CLAUDE_VERSION=
 echo         OK: Claude Code CLI !CLAUDE_VERSION!
 
 if not exist "config\agent_home\.claude\settings.json" (
-    echo         提示: 尚未配置提示词生成智能体 API。
-    echo         启动后请在 Web 界面「提示词生成」Tab 填写 URL / Key / Model。
+    echo         INFO: Agent API is not configured yet.
+    echo         Configure Agent URL / Key / Model in the web UI after launch.
 ) else (
-    echo         OK: 已发现 Claude 智能体配置文件
+    echo         OK: Claude agent config file detected
 )
 
 echo   [5/6] 检查端口 %APP_PORT% ...
@@ -169,7 +169,7 @@ goto :fail
 
 :python_too_old
 echo.
-echo   [错误] Python 版本过低，需要 Python 3.9+。
+echo   [错误] Python 版本过低，需要 Python 3.10+。
 echo   当前版本:
 %PYTHON_CMD% --version
 echo   下载地址: https://www.python.org/downloads/

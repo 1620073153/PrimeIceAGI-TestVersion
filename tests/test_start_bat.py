@@ -27,3 +27,17 @@ def test_start_bat_uses_windows_crlf_line_endings():
 
     assert b"\r\n" in raw
     assert raw.count(b"\r\n") >= raw.count(b"\n") - 1
+
+
+def test_start_bat_requires_python_3_10_or_newer():
+    content = START_BAT.read_text(encoding="utf-8")
+
+    assert "sys.version_info >= (3, 10)" in content
+    assert "Python 3.10+" in content
+
+
+def test_start_bat_uses_ascii_fallback_hint_for_missing_agent_settings():
+    content = START_BAT.read_text(encoding="utf-8")
+
+    assert "Configure Agent URL / Key / Model in the web UI after launch." in content
+    assert "请在 Web 界面" not in content
