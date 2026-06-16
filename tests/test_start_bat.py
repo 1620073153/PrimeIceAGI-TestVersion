@@ -1,7 +1,9 @@
 from pathlib import Path
 
 
-START_BAT = Path(__file__).resolve().parents[1] / "start.bat"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+START_BAT = PROJECT_ROOT / "start.bat"
+GITATTRIBUTES = PROJECT_ROOT / ".gitattributes"
 
 
 def test_start_bat_opens_existing_healthy_service_when_port_is_in_use():
@@ -41,3 +43,9 @@ def test_start_bat_uses_ascii_fallback_hint_for_missing_agent_settings():
 
     assert "Configure Agent URL / Key / Model in the web UI after launch." in content
     assert "请在 Web 界面" not in content
+
+
+def test_gitattributes_forces_crlf_for_bat_files():
+    content = GITATTRIBUTES.read_text(encoding="utf-8")
+
+    assert "*.bat text eol=crlf" in content
