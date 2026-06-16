@@ -3,9 +3,10 @@
 import time
 import threading
 from engine.orchestrator import RedTeamOrchestrator
+from engine.claude_agent import validate_claude_ready_for_start
 from backend.task_manager import TaskManager
 from backend.event_bus import EventBus
-from backend.schemas import validate_test_config
+from backend.schemas import validate_test_config, ValidationError
 from data.kb_store import save_session
 
 _tm = TaskManager()
@@ -21,6 +22,9 @@ def _schedule_event_bus_cleanup(task_id: str):
 
 def start_test(config: dict) -> str:
     config = validate_test_config(config)
+    preflight = validate_claude_ready_for_start(config)
+    if not preflight["ok"]:
+        raise ValidationError(preflight["message"])
     task_id = _tm.create_task(config)
     thread = threading.Thread(target=_run, args=(task_id,), daemon=True)
     thread.start()

@@ -14,6 +14,7 @@ import logging
 import os
 import random
 import threading
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
@@ -39,6 +40,106 @@ AGENT_HOME = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "config", "agent_home"
 )
+
+
+def _agent_claude_dir() -> Path:
+    return Path(AGENT_HOME) / ".claude"
+
+
+def _agent_settings_path() -> Path:
+    return _agent_claude_dir() / "settings.json"
+
+
+def _prompt_skill_path() -> Path:
+    return _agent_claude_dir() / "skills" / "prompt-skill" / "SKILL.md"
+
+
+def _validate_agent_settings_file(settings_path: Path) -> tuple[bool, str]:
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False, "项目内 Claude 配置文件损坏，请在前端重新保存 URL / Key / Model。"
+    except OSError:
+        return False, "项目内 Claude 配置读取失败，请在前端重新保存 URL / Key / Model。"
+
+    env = settings.get("env")
+    if not isinstance(env, dict):
+        return False, "项目内 Claude 配置缺少 env 字段，请在前端重新保存 URL / Key / Model。"
+
+    url = str(env.get("ANTHROPIC_BASE_URL", "")).strip()
+    key = str(env.get("ANTHROPIC_AUTH_TOKEN", "")).strip()
+    model = str(env.get("ANTHROPIC_MODEL", "")).strip()
+    placeholder_values = {
+        "your-api-key-here",
+        "your-api-base-url-here",
+        "your-model-here",
+        "your-model-name-here",
+    }
+    values = {url, key, model}
+
+    if not url or not key or not model:
+        return False, "项目内 Claude 配置尚未完成，请在前端填写有效的 URL / Key / Model。"
+    if values & placeholder_values:
+        return False, "项目内 Claude 配置尚未完成，请在前端填写有效的 URL / Key / Model。"
+
+    return True, "ok"
+
+
+def _claude_cli_available() -> bool:
+    try:
+        completed = subprocess.run(
+            "claude --version",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            shell=True,
+        )
+        return completed.returncode == 0
+    except OSError:
+        return False
+
+
+def get_project_local_claude_status() -> dict:
+    settings_path = _agent_settings_path()
+    prompt_skill_path = _prompt_skill_path()
+    settings_exists = settings_path.exists()
+    prompt_skill_exists = prompt_skill_path.exists()
+    cli_available = _claude_cli_available()
+    settings_valid = False
+
+    if not cli_available:
+        message = "Claude Code CLI 不可用，请先安装项目要求的 Claude CLI。"
+    elif not prompt_skill_exists:
+        message = "项目内 prompt-skill 缺失，请重新获取完整发布包。"
+    elif not settings_exists:
+        message = "项目内 Claude 尚未配置，请先在前端填写并保存 URL / Key / Model。"
+    else:
+        settings_valid, message = _validate_agent_settings_file(settings_path)
+        if settings_valid:
+            message = "项目内 Claude 基础配置已就绪。"
+
+    return {
+        "cli_available": cli_available,
+        "settings_exists": settings_exists,
+        "settings_valid": settings_valid,
+        "prompt_skill_exists": prompt_skill_exists,
+        "settings_path": str(settings_path),
+        "ready": bool(cli_available and prompt_skill_exists and settings_exists and settings_valid),
+        "message": message,
+    }
+
+
+def validate_claude_ready_for_start(config: dict) -> dict:
+    status = get_project_local_claude_status()
+    if not status["cli_available"]:
+        return {"ok": False, "message": status["message"]}
+    if not status["prompt_skill_exists"]:
+        return {"ok": False, "message": status["message"]}
+    if not status["settings_exists"]:
+        return {"ok": False, "message": status["message"]}
+    if not status.get("settings_valid", False):
+        return {"ok": False, "message": status["message"]}
+    return {"ok": True, "message": "ok"}
 
 
 def _build_prompt_skill_message(

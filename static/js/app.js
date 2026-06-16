@@ -446,16 +446,26 @@ document.addEventListener('DOMContentLoaded', function () {
 function loadClaudeCfg() {
   fetch('/api/claude-agent/config').then(function (r) { return r.json(); }).then(function (d) {
     var data = d.data || {};
+    var status = data.status || {};
     document.getElementById('claude_agent_url').value = data.url || '';
     document.getElementById('claude_agent_key').value = data.key || '';
     document.getElementById('claude_agent_model').value = data.model || '';
+    var st = document.getElementById('claude-cfg-status');
+    if (st) {
+      st.textContent = status.message || '';
+      st.style.color = status.ready ? 'var(--success)' : 'var(--warning)';
+    }
   }).catch(function () { toast('加载提示词生成配置失败', 'error'); });
 }
 function saveClaudeCfg() {
   var payload = { url: document.getElementById('claude_agent_url').value.trim(), key: document.getElementById('claude_agent_key').value.trim(), model: document.getElementById('claude_agent_model').value.trim() };
   fetch('/api/claude-agent/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { var st = document.getElementById('claude-cfg-status'); st.textContent = d.ok ? '已保存' : (d.error || '失败'); setTimeout(function () { st.textContent = ''; }, 3000); })
+    .then(function (d) {
+      var st = document.getElementById('claude-cfg-status');
+      st.textContent = d.ok ? '已保存' : (d.error || '失败');
+      setTimeout(function () { loadClaudeCfg(); }, 100);
+    })
     .catch(function () { toast('保存配置失败', 'error'); });
 }
 function syncToAux() {

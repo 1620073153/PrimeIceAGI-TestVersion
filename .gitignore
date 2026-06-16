@@ -33,6 +33,14 @@ config/agent_home/.claude/telemetry/
 config/agent_home/.claude/.last-cleanup
 config/agent_home/.claude.json
 
+!config/agent_home/.claude/CLAUDE.md
+!config/agent_home/.claude/settings.json.example
+!config/agent_home/.claude/skills/
+!config/agent_home/.claude/skills/prompt-skill/
+!config/agent_home/.claude/skills/prompt-skill/SKILL.md
+!config/agent_home/.claude/skills/prompt-skill/evals/
+!config/agent_home/.claude/skills/prompt-skill/evals/evals.json
+
 # 其他 config 运行时文件（含密钥）
 config/claude_agent_settings.json
 config/claude_home/

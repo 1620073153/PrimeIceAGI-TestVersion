@@ -23,3 +23,12 @@ def test_batch_js_contains_dataset_extension_validation_and_history_loading():
     assert "batch-last-reason" in script
     assert "Math.min(100" in script
     assert "limit=20" in script
+
+
+def test_app_js_surfaces_project_local_claude_status():
+    script = (PROJECT_ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+
+    assert "var status = data.status || {};" in script
+    assert "st.textContent = status.message || '';" in script
+    assert "st.style.color = status.ready ? 'var(--success)' : 'var(--warning)';" in script
+    assert "setTimeout(function () { loadClaudeCfg(); }, 100);" in script

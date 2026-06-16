@@ -6,7 +6,7 @@ import requests
 from flask import Blueprint, request, jsonify
 
 from engine.target_client import PRESET_TEMPLATES
-from engine.claude_agent import AGENT_HOME
+from engine.claude_agent import AGENT_HOME, get_project_local_claude_status
 
 health_bp = Blueprint("health", __name__)
 
@@ -86,20 +86,22 @@ def probe_target():
 @health_bp.route("/api/claude-agent/config", methods=["GET"])
 def get_claude_agent_config():
     """读取 Claude 智能体配置"""
+    status = get_project_local_claude_status()
     try:
         with open(AGENT_SETTINGS_PATH, "r", encoding="utf-8") as f:
             settings = json.load(f)
-        env = settings.get("env", {})
+        env = settings.get("env", {}) if isinstance(settings, dict) else {}
         return jsonify({
             "ok": True,
             "data": {
                 "url": env.get("ANTHROPIC_BASE_URL", ""),
                 "key": env.get("ANTHROPIC_AUTH_TOKEN", ""),
                 "model": env.get("ANTHROPIC_MODEL", ""),
+                "status": status,
             }
         })
-    except FileNotFoundError:
-        return jsonify({"ok": True, "data": {"url": "", "key": "", "model": ""}})
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return jsonify({"ok": True, "data": {"url": "", "key": "", "model": "", "status": status}})
 
 
 @health_bp.route("/api/claude-agent/config", methods=["POST"])

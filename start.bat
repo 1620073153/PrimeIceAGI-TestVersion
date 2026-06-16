@@ -77,10 +77,11 @@ for /f "delims=" %%v in ('call claude --version 2^>^&1') do set "CLAUDE_VERSION=
 echo         OK: Claude Code CLI !CLAUDE_VERSION!
 
 if not exist "config\agent_home\.claude\settings.json" (
-    echo         INFO: Agent API is not configured yet.
-    echo         Configure Agent URL / Key / Model in the web UI after launch.
+    echo         INFO: Project-local Claude config not found yet.
+    echo         Open the web UI, fill Agent URL / Key / Model, then start testing.
+    echo         Config will be written into config\agent_home\.claude\settings.json.
 ) else (
-    echo         OK: Claude agent config file detected
+    echo         OK: Project-local Claude config file detected
 )
 
 echo   [5/6] 检查端口 %APP_PORT% ...

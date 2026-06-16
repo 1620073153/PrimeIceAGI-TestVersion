@@ -76,15 +76,95 @@ class TestClaudeAgentConfig:
             "backend.routes.health.AGENT_SETTINGS_PATH",
             str(tmp_path / "nonexistent.json")
         )
+        monkeypatch.setattr(
+            "backend.routes.health.get_project_local_claude_status",
+            lambda: {
+                "cli_available": True,
+                "settings_exists": False,
+                "prompt_skill_exists": True,
+                "settings_path": str(tmp_path / "nonexistent.json"),
+                "ready": False,
+                "message": "项目内 Claude 尚未配置，请先在前端填写并保存 URL / Key / Model。",
+            },
+        )
         r = client.get("/api/claude-agent/config")
         assert r.status_code == 200
         data = r.get_json()
         assert data["ok"] is True
         assert data["data"]["url"] == ""
+        assert data["data"]["status"]["ready"] is False
+
+    def test_get_claude_agent_config_includes_status_summary(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "backend.routes.health.get_project_local_claude_status",
+            lambda: {
+                "cli_available": True,
+                "settings_exists": False,
+                "settings_valid": False,
+                "prompt_skill_exists": True,
+                "settings_path": "config/agent_home/.claude/settings.json",
+                "ready": False,
+                "message": "项目内 Claude 尚未配置，请先在前端填写并保存 URL / Key / Model。",
+            },
+        )
+
+        r = client.get("/api/claude-agent/config")
+        payload = r.get_json()
+
+        assert payload["ok"] is True
+        assert payload["data"]["status"]["ready"] is False
+        assert "URL / Key / Model" in payload["data"]["status"]["message"]
+
+    def test_get_claude_agent_config_returns_status_when_settings_json_is_invalid(self, client, tmp_path, monkeypatch):
+        broken_settings = tmp_path / "settings.json"
+        broken_settings.write_text("{broken json", encoding="utf-8")
+        monkeypatch.setattr("backend.routes.health.AGENT_SETTINGS_PATH", str(broken_settings))
+        monkeypatch.setattr(
+            "backend.routes.health.get_project_local_claude_status",
+            lambda: {
+                "cli_available": True,
+                "settings_exists": True,
+                "settings_valid": False,
+                "prompt_skill_exists": True,
+                "settings_path": str(broken_settings),
+                "ready": False,
+                "message": "项目内 Claude 配置文件损坏，请在前端重新保存 URL / Key / Model。",
+            },
+        )
+
+        r = client.get("/api/claude-agent/config")
+        payload = r.get_json()
+
+        assert r.status_code == 200
+        assert payload["ok"] is True
+        assert payload["data"]["url"] == ""
+        assert payload["data"]["status"]["ready"] is False
+        assert "配置文件损坏" in payload["data"]["status"]["message"]
 
     def test_save_config_missing_fields(self, client):
         r = client.post("/api/claude-agent/config", json={"url": "", "key": "", "model": ""})
         assert r.status_code == 400
+
+
+class TestStartValidation:
+    def test_start_test_returns_400_when_project_local_claude_not_ready(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "backend.services.test_service.validate_claude_ready_for_start",
+            lambda config: {"ok": False, "message": "项目内 Claude 尚未配置，请先在前端填写并保存 URL / Key / Model。"},
+        )
+
+        r = client.post(
+            "/api/test/start",
+            json={
+                "target_api_url": "https://example.com",
+                "target_api_key": "secret",
+            },
+        )
+
+        assert r.status_code == 400
+        payload = r.get_json()
+        assert payload["ok"] is False
+        assert "项目内 Claude 尚未配置" in payload["error"]
 
 
 class TestKbRoutes:

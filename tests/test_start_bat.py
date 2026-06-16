@@ -41,7 +41,7 @@ def test_start_bat_requires_python_3_10_or_newer():
 def test_start_bat_uses_ascii_fallback_hint_for_missing_agent_settings():
     content = START_BAT.read_text(encoding="utf-8")
 
-    assert "Configure Agent URL / Key / Model in the web UI after launch." in content
+    assert "Open the web UI, fill Agent URL / Key / Model, then start testing." in content
     assert "请在 Web 界面" not in content
 
 
@@ -49,3 +49,22 @@ def test_gitattributes_forces_crlf_for_bat_files():
     content = GITATTRIBUTES.read_text(encoding="utf-8")
 
     assert "*.bat text eol=crlf" in content
+
+
+def test_start_bat_treats_missing_agent_settings_as_non_blocking_notice():
+    content = START_BAT.read_text(encoding="utf-8")
+
+    assert "Project-local Claude config not found yet." in content
+    assert "Open the web UI, fill Agent URL / Key / Model, then start testing." in content
+    block = content.split('if not exist "config\\agent_home\\.claude\\settings.json" (', 1)[1].split(") else (", 1)[0]
+    assert "goto :fail" not in block
+
+
+def test_gitignore_keeps_local_claude_template_but_ignores_runtime_state():
+    content = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
+
+    assert "config/agent_home/.claude/settings.json" in content
+    assert "!config/agent_home/.claude/settings.json.example" in content
+    assert "!config/agent_home/.claude/CLAUDE.md" in content
+    assert "!config/agent_home/.claude/skills/prompt-skill/SKILL.md" in content
+    assert "config/agent_home/.claude/telemetry/" in content
