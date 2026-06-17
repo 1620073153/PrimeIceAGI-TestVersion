@@ -2,6 +2,7 @@
 
 from engine.claude_agent import (
     _build_prompt_skill_message,
+    _build_continuation_message,
     _parse_prompt_list,
     _parse_freeform_prompts,
     _parse_continuations,
@@ -90,3 +91,25 @@ class TestDiagnostics:
         assert preview.startswith("第一行 第二行")
         assert "\n" not in preview
         assert preview.endswith("...<truncated>")
+
+
+class TestBuildContinuationMessage:
+    def test_message_uses_selected_session_wording_and_reason(self):
+        message = _build_continuation_message(
+            [
+                {
+                    "session_id": "s1",
+                    "turn_num": 2,
+                    "target_category": "A-1",
+                    "selection_reason": "fresh_success",
+                    "messages": [
+                        {"role": "user", "content": "继续"},
+                        {"role": "assistant", "content": "回应"},
+                    ],
+                }
+            ]
+        )
+
+        assert "入选会话" in message
+        assert "fresh_success" in message
+        assert "共1个入选会话" in message

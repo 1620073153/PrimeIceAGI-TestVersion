@@ -20,6 +20,7 @@ from engine.strategy_arbitrator import decide_next_strategy, check_convergence, 
 from engine.system_prompt_inferrer import infer_boundary_summary
 from engine.boundary_tracker import record_boundaries, build_matrix, format_boundary_intel
 from engine.variant_generator import generate_variants
+from engine.continuation_scheduler import select_continuation_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,9 @@ class RedTeamOrchestrator:
 
         self._claude_agent_settings = config.get("claude_agent_settings")
         self._allow_continuation = _parse_bool(config.get("allow_continuation"), default=True)
+        self._continuation_budget = int(config.get("continuation_budget", 5))
+        self._continuation_fresh_ratio = float(config.get("continuation_fresh_ratio", 0.4))
+        self._continuation_cluster_cap = float(config.get("continuation_cluster_cap", 0.4))
 
     def stop(self):
         """外部终止"""
@@ -139,9 +143,12 @@ class RedTeamOrchestrator:
                 sess["messages"].append({"role": "assistant", "content": result.get("response_text", "")})
                 sess["turn_num"] += 1
                 sess["last_success_round"] = self.current_round
+                sess["continuation_count"] = int(sess.get("continuation_count", 0) or 0) + 1
+                sess["success_score"] = max(float(sess.get("success_score", 1.0)), 1.0)
                 return
         else:
             sid = f"S-{self.current_round}-{result.get('prompt_id', 'x')}"
+            category = result.get("target_category", "")
             self.active_sessions[sid] = {
                 "session_id": sid,
                 "messages": [
@@ -149,9 +156,14 @@ class RedTeamOrchestrator:
                     {"role": "assistant", "content": result.get("response_text", "")},
                 ],
                 "turn_num": 1,
-                "target_category": result.get("target_category", ""),
+                "target_category": category,
+                "cluster": category.split("-", 1)[0] if category else "",
+                "concept": result.get("concept", ""),
+                "method": result.get("method", ""),
                 "created_round": self.current_round,
                 "last_success_round": self.current_round,
+                "continuation_count": 0,
+                "success_score": 1.0,
             }
             # 脚本模式：注册 session 供续攻复用
             if hasattr(self.target_client, "register_session"):
@@ -458,10 +470,32 @@ class RedTeamOrchestrator:
         new_prompts = []
         cont_prompts = []
 
-        # 准备存活会话列表
+        # 准备本轮入选续攻会话
         sessions_for_cont = []
         if self._allow_continuation and self.active_sessions:
-            sessions_for_cont = list(self.active_sessions.values())
+            sessions_for_cont = select_continuation_sessions(
+                list(self.active_sessions.values()),
+                current_round=self.current_round,
+                continuation_budget=self._continuation_budget,
+                fresh_success_round=self.current_round - 1,
+                fresh_min_ratio=self._continuation_fresh_ratio,
+                per_cluster_cap=self._continuation_cluster_cap,
+            )
+            self.event_callback({
+                "event": "continuation_selection",
+                "round": self.current_round,
+                "candidate_count": len(self.active_sessions),
+                "selected_count": len(sessions_for_cont),
+                "selected_sessions": [
+                    {
+                        "id": s["session_id"],
+                        "rank": s.get("continuation_rank"),
+                        "reason": s.get("selection_reason"),
+                        "cluster": s.get("cluster", ""),
+                    }
+                    for s in sessions_for_cont
+                ],
+            })
 
         if self.strategy.get("variant_mode") and self.strategy.get("successful_templates"):
             new_prompts = generate_variants(
