@@ -1,4 +1,30 @@
+from engine.adapters.claude_agent_adapter import build_new_attack_generation_request
 from engine.orchestrator import RedTeamOrchestrator
+
+
+def test_new_attack_generation_request_keeps_prompt_skill_but_only_passes_summary_refs():
+    request = build_new_attack_generation_request(
+        round_num=3,
+        payload={
+            "strategy": {"subcategories": ["B-1"]},
+            "kb5_summary": "intel",
+            "history_feedback": "feedback",
+            "successful_prompts": [
+                {
+                    "prompt_id": "p01",
+                    "target_category": "B-2",
+                    "strategy_tags": ["role_play", "authority_framing"],
+                    "concept": "role_play",
+                    "method": "authority_framing",
+                }
+            ],
+        },
+    )
+
+    assert request["round_num"] == 3
+    assert request["successful_prompts"][0]["target_category"] == "B-2"
+    assert "prompt_text" not in request["successful_prompts"][0]
+    assert request["generator"] == "prompt_skill"
 
 
 def test_feedback_to_new_attack_uses_success_summary_not_full_prompt_text(monkeypatch):

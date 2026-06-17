@@ -13,6 +13,10 @@ from typing import Callable
 
 from engine.target_client import TargetClient, PRESET_TEMPLATES
 from engine import claude_agent
+from engine.pipelines.new_attack import pipeline as new_attack_pipeline
+from engine.pipelines.continuation import pipeline as continuation_pipeline
+from engine.runtime import RoundContext, SessionStore, SessionCache, SuccessMemory, FailureMemory, ScoringStore
+from engine.scheduling.budget_allocator import allocate_round_budget
 from engine.signal_extractor import analyze_single_result, analyze_batch_results, is_guardrail_blocked
 from engine.response_judge import judge_batch
 from engine.llm_client import LLMClient
@@ -21,6 +25,7 @@ from engine.system_prompt_inferrer import infer_boundary_summary
 from engine.boundary_tracker import record_boundaries, build_matrix, format_boundary_intel
 from engine.variant_generator import generate_variants
 from engine.continuation_scheduler import select_continuation_sessions
+from engine.summarizers.judge_input_compactor import compact_batch_for_judge
 
 logger = logging.getLogger(__name__)
 
@@ -126,10 +131,20 @@ class RedTeamOrchestrator:
         self._continuation_fresh_ratio = float(config.get("continuation_fresh_ratio", 0.4))
         self._continuation_cluster_cap = float(config.get("continuation_cluster_cap", 0.4))
 
+        self.session_store = SessionStore.seed(self.active_sessions)
+        self.session_cache = SessionCache()
+        self.success_memory = SuccessMemory.seed(self.all_successful_prompts)
+        self.failure_memory = FailureMemory()
+        self.scoring_store = ScoringStore()
+
     def stop(self):
         """外部终止"""
         self._stopped = True
         claude_agent.kill_active()
+
+    def _sync_runtime_from_legacy_state(self):
+        self.session_store = SessionStore.seed(self.active_sessions)
+        self.success_memory = SuccessMemory.seed(self.all_successful_prompts)
 
     # ── 会话管理 ──
 
@@ -284,7 +299,15 @@ class RedTeamOrchestrator:
             # ── Step 5: 裁判 (并行) ──
             if self._agent2_enabled and self._judge_client:
                 self.event_callback({"event": "judging", "round": self.current_round})
-                analyzed_results = judge_batch(analyzed_results, self._judge_client, max_workers=10)
+                compacted_results = compact_batch_for_judge(analyzed_results)
+                judged = judge_batch(compacted_results, self._judge_client, max_workers=10)
+                judged_by_prompt_id = {item.get("prompt_id", ""): item for item in judged}
+                for result in analyzed_results:
+                    judged_item = judged_by_prompt_id.get(result.get("prompt_id", ""))
+                    if judged_item:
+                        result["status"] = judged_item.get("status", result["status"])
+                        result["judge_reason"] = judged_item.get("judge_reason", "")
+                        result["judge_confidence"] = judged_item.get("judge_confidence", result.get("judge_confidence", 0.5))
                 stats["bypassed"] = sum(1 for r in analyzed_results if r["status"] == "bypassed")
                 stats["blocked"] = sum(1 for r in analyzed_results if r["status"] in ("blocked", "guardrail_blocked"))
                 stats["partial"] = sum(1 for r in analyzed_results if r["status"] == "partial")
@@ -466,59 +489,52 @@ class RedTeamOrchestrator:
     # ── 辅助方法 ──
 
     def _summarize_successes_for_new_attack(self, successful: list[dict]) -> list[dict]:
-        summarized = []
-        for item in successful[:3]:
-            summarized.append({
-                "prompt_id": item.get("prompt_id", ""),
-                "target_category": item.get("target_category", ""),
-                "strategy_tags": list(item.get("strategy_tags", []))[:4],
-                "concept": item.get("concept", ""),
-                "method": item.get("method", ""),
-                "type": item.get("type", "new"),
-            })
-        return summarized
+        return new_attack_pipeline.summarize_successes_for_new_attack(successful)
 
     def _generate_all_prompts(self) -> tuple[list[dict], list[dict]]:
         """并行生成新攻 + 续攻提示词"""
         new_prompts = []
         cont_prompts = []
 
-        # 准备本轮入选续攻会话
-        sessions_for_cont = []
-        if self._allow_continuation and self.active_sessions:
-            sessions_for_cont = select_continuation_sessions(
-                list(self.active_sessions.values()),
-                current_round=self.current_round,
-                continuation_budget=self._continuation_budget,
-                fresh_success_round=self.current_round - 1,
-                fresh_min_ratio=self._continuation_fresh_ratio,
-                per_cluster_cap=self._continuation_cluster_cap,
-            )
-            self.event_callback({
-                "event": "continuation_selection",
-                "round": self.current_round,
-                "candidate_count": len(self.active_sessions),
-                "selected_count": len(sessions_for_cont),
-                "selected_sessions": [
-                    {
-                        "id": s["session_id"],
-                        "rank": s.get("continuation_rank"),
-                        "reason": s.get("selection_reason"),
-                        "cluster": s.get("cluster", ""),
-                    }
-                    for s in sessions_for_cont
-                ],
-            })
+        self._sync_runtime_from_legacy_state()
+        budget = allocate_round_budget(
+            total_slots=10,
+            active_session_count=len(self.active_sessions),
+            recent_success_rate=(len(self.all_successful_prompts[-5:]) / 5.0) if self.all_successful_prompts else 0.0,
+            repeated_pattern_ratio=0.0,
+        )
+        round_context = RoundContext(
+            current_round=self.current_round,
+            strategy={**self.strategy, "current_round": self.current_round},
+            token_budget_ratio=budget["token_budget_ratio"],
+        )
 
-        success_refs = self._summarize_successes_for_new_attack(self.all_successful_prompts[-5:] if self.all_successful_prompts else [])
+        sessions_for_cont, continuation_event = continuation_pipeline.prepare_continuation_round(
+            active_sessions=self.session_store.snapshot(),
+            current_round=self.current_round,
+            allow_continuation=self._allow_continuation,
+            continuation_budget=self._continuation_budget,
+            continuation_fresh_ratio=self._continuation_fresh_ratio,
+            continuation_cluster_cap=self._continuation_cluster_cap,
+            scheduler=select_continuation_sessions,
+        )
+        if continuation_event:
+            self.event_callback(continuation_event)
+
+        new_attack_payload = new_attack_pipeline.prepare_new_attack_payload(
+            strategy=round_context.strategy,
+            kb5_summary=self.kb5_summary,
+            history_feedback=self.history_feedback,
+            all_successful_prompts=self.success_memory.latest(),
+        )
 
         try:
             new_prompts, cont_prompts = claude_agent.generate_parallel(
                 round_num=self.current_round,
-                strategy=self.strategy,
-                kb5_summary=self.kb5_summary,
-                history_feedback=self.history_feedback,
-                successful_prompts=success_refs if success_refs else None,
+                strategy=new_attack_payload["strategy"],
+                kb5_summary=new_attack_payload.get("kb5_summary", ""),
+                history_feedback=new_attack_payload.get("history_feedback", ""),
+                successful_prompts=new_attack_payload.get("successful_prompts"),
                 active_sessions=sessions_for_cont if sessions_for_cont else None,
                 timeout=180.0,
                 settings_path=self._claude_agent_settings,

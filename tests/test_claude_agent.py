@@ -134,9 +134,18 @@ class TestBuildContinuationMessage:
                     "turn_num": 2,
                     "target_category": "A-1",
                     "selection_reason": "fresh_success",
-                    "messages": [
-                        {"role": "user", "content": "继续"},
+                    "state_summary": {
+                        "session_id": "s1",
+                        "target_category": "A-1",
+                        "selection_reason": "fresh_success",
+                    },
+                    "recent_context_fragments": [
                         {"role": "assistant", "content": "回应"},
+                        {"role": "user", "content": "继续"},
+                    ],
+                    "messages": [
+                        {"role": "user", "content": "旧消息1"},
+                        {"role": "assistant", "content": "旧消息2"},
                     ],
                 }
             ]
@@ -145,3 +154,6 @@ class TestBuildContinuationMessage:
         assert "入选会话" in message
         assert "fresh_success" in message
         assert "共1个入选会话" in message
+        assert "[assistant]: 回应" in message
+        assert "[user]: 继续" in message
+        assert "旧消息1" not in message

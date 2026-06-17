@@ -472,16 +472,16 @@ def _build_continuation_message(
     parts.append(f"\n共{len(active_sessions)}个入选会话，每个会话生成1条续攻提示词：")
 
     for sess in active_sessions:
-        sid = sess["session_id"]
-        turn_num = sess.get("turn_num", 1)
-        category = sess.get("target_category", "")
-        selection_reason = sess.get("selection_reason")
+        summary = sess.get("state_summary", {})
+        sid = summary.get("session_id", sess.get("session_id", ""))
+        category = summary.get("target_category", sess.get("target_category", ""))
+        selection_reason = summary.get("selection_reason", sess.get("selection_reason", ""))
         reason_text = f", 入选原因:{selection_reason}" if selection_reason else ""
-        parts.append(f"\n--- 会话 {sid} (已{turn_num}轮, 类别:{category}{reason_text}) ---")
-        messages = sess.get("messages", [])
-        for msg in messages[-6:]:
-            role = msg["role"]
-            content = msg["content"][:400]
+        parts.append(f"\n--- 会话 {sid} (类别:{category}{reason_text}) ---")
+        fragments = sess.get("recent_context_fragments") or []
+        for fragment in fragments:
+            role = fragment.get("role", "")
+            content = fragment.get("content", "")[:400]
             parts.append(f"[{role}]: {content}")
 
     parts.append(f"\n输出要求：JSON数组，每条包含 session_id, prompt_text 字段。共{len(active_sessions)}条。")
