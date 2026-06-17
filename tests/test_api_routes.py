@@ -167,6 +167,63 @@ class TestStartValidation:
         assert "项目内 Claude 尚未配置" in payload["error"]
 
 
+class TestCustomTemplateRoutes:
+    def test_parse_curl_endpoint_returns_400_when_text_missing(self, client):
+        r = client.post("/api/parse-curl", json={})
+
+        assert r.status_code == 400
+        payload = r.get_json()
+        assert payload["ok"] is False
+        assert "请提供 curl 命令或 HTTP 请求文本" in payload["error"]
+
+    def test_parse_curl_endpoint_parses_raw_http_into_custom_template(self, client):
+        raw_http = (
+            "POST /api/workflows/run HTTP/1.1\n"
+            "Host: agent.example.com\n"
+            "Accept: text/event-stream\n"
+            "Content-Type: application/json\n"
+            "X-App-Code: code-123\n"
+            "\n"
+            '{"inputs":{"v_laws":"这里是提示词"},"response_mode":"streaming"}'
+        )
+
+        r = client.post("/api/parse-curl", json={"curl": raw_http, "use_llm": False})
+
+        assert r.status_code == 200
+        payload = r.get_json()
+        assert payload["ok"] is True
+        data = payload["data"]
+        assert data["template_name"] == "custom"
+        assert data["api_url"] == "https://agent.example.com/api/workflows/run"
+        assert data["method"] == "POST"
+        assert data["stream"] is True
+        assert data["headers"]["X-App-Code"] == "code-123"
+        assert data["body"]["inputs"]["v_laws"] == "{{prompt}}"
+
+    def test_test_fire_route_runs_compiled_script(self, client):
+        script = (
+            "def call_target(prompt: str, history: list = None) -> dict:\n"
+            "    return {\n"
+            "        'response_text': f'echo:{prompt}',\n"
+            "        'reasoning_text': '',\n"
+            "        'status': 'success',\n"
+            "        'error': None,\n"
+            "        'latency_ms': 3,\n"
+            "    }\n"
+        )
+
+        r = client.post(
+            "/api/test-fire",
+            json={"compiled_script": script, "script_mode": "single", "test_prompt": "你好"},
+        )
+
+        assert r.status_code == 200
+        payload = r.get_json()
+        assert payload["ok"] is True
+        assert payload["data"]["status"] == "success"
+        assert payload["data"]["response_text"] == "echo:你好"
+
+
 class TestKbRoutes:
     def test_get_kb1_data(self, client):
         r = client.get("/api/kb/kb1/data")

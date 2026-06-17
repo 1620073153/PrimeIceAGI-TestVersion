@@ -126,6 +126,76 @@ def _render_template(template: Any, variables: dict) -> Any:
     return template
 
 
+def _read_sse_stream(resp, response_path: dict) -> tuple[str, str, dict]:
+    """
+    读取 SSE stream 响应，拼接 content chunks
+
+    支持多种 SSE 格式：
+    1. OpenAI 兼容: choices[0].delta.content
+    2. Dify workflow: data.outputs / event: message
+    3. 通用 JSON: 用 response_path 提取
+    4. 纯文本 data: 行直接拼接
+    """
+    content_parts = []
+    reasoning_parts = []
+    last_raw = {}
+    raw_text_parts = []
+
+    content_path = response_path.get("content", "") if response_path else ""
+
+    for line in resp.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+        if line.startswith("data: "):
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                last_raw = chunk
+
+                # 策略 1: OpenAI 兼容格式
+                choices = chunk.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    if delta.get("content"):
+                        content_parts.append(delta["content"])
+                    if delta.get("reasoning_content"):
+                        reasoning_parts.append(delta["reasoning_content"])
+                    continue
+
+                # 策略 2: Dify / workflow 格式 (answer 字段)
+                if chunk.get("answer"):
+                    content_parts.append(chunk["answer"])
+                    continue
+
+                # 策略 3: 通用字段名探测
+                for key in ("text", "content", "message", "result", "output", "reply"):
+                    val = chunk.get(key)
+                    if isinstance(val, str) and val:
+                        content_parts.append(val)
+                        break
+                else:
+                    # 策略 4: 用 response_path 从 chunk 提取
+                    if content_path:
+                        extracted = _get_by_path(chunk, content_path)
+                        if extracted:
+                            content_parts.append(extracted)
+                    else:
+                        raw_text_parts.append(data_str)
+
+            except (json.JSONDecodeError, KeyError, IndexError):
+                # 非 JSON 的 data 行，直接作为文本拼接
+                raw_text_parts.append(data_str)
+
+    # 如果结构化提取没有结果，用原始文本
+    final_content = "".join(content_parts)
+    if not final_content and raw_text_parts:
+        final_content = "".join(raw_text_parts)
+
+    return final_content, "".join(reasoning_parts), last_raw
+
+
 class TargetClient:
     """待测模型 API 客户端 — 支持预设和自定义模板"""
 
@@ -133,6 +203,10 @@ class TargetClient:
         self.config = config
         self.template_name = config.get("template_name", "openai_compatible")
         self.template = self._load_template()
+        self.stream_mode = self.config.get("stream", False) or (
+            isinstance(self.template.get("body"), dict)
+            and self.template.get("body", {}).get("stream", False)
+        )
 
     def _load_template(self) -> dict:
         """加载模板：优先使用自定义配置，否则使用预设"""
@@ -210,6 +284,7 @@ class TargetClient:
                     headers=req["headers"],
                     json=req["body"] if isinstance(req["body"], dict) else req["body"],
                     timeout=req["timeout"],
+                    stream=self.stream_mode,
                 )
             result["latency_ms"] = round((time.time() - t0) * 1000)
 
@@ -218,21 +293,33 @@ class TargetClient:
                 result["response_text"] = resp.text[:500]
                 return result
 
-            raw = resp.json()
-            result["raw_response"] = raw
+            if self.stream_mode:
+                content, reasoning, last_raw = _read_sse_stream(
+                    resp, self.template.get("response_path", {})
+                )
+                result["response_text"] = content
+                result["reasoning_text"] = reasoning
+                result["raw_response"] = last_raw
+                if content or reasoning:
+                    result["status"] = "success"
+                else:
+                    result["error"] = "SSE stream 无有效内容"
+            else:
+                raw = resp.json()
+                result["raw_response"] = raw
 
-            resp_path = self.template.get("response_path", {})
-            result["response_text"] = _get_by_path(raw, resp_path.get("content", ""))
-            result["reasoning_text"] = _get_by_path(raw, resp_path.get("reasoning", ""))
+                resp_path = self.template.get("response_path", {})
+                result["response_text"] = _get_by_path(raw, resp_path.get("content", ""))
+                result["reasoning_text"] = _get_by_path(raw, resp_path.get("reasoning", ""))
 
-            # Anthropic 格式 fallback：content[0] 可能是 thinking 块，遍历找 text 块
-            if not result["response_text"] and isinstance(raw.get("content"), list):
-                result["response_text"] = _extract_anthropic_text(raw)
+                # Anthropic 格式 fallback：content[0] 可能是 thinking 块，遍历找 text 块
+                if not result["response_text"] and isinstance(raw.get("content"), list):
+                    result["response_text"] = _extract_anthropic_text(raw)
 
-            if not result["response_text"] and not result["reasoning_text"]:
-                result["response_text"] = json.dumps(raw, ensure_ascii=False)[:2000]
+                if not result["response_text"] and not result["reasoning_text"]:
+                    result["response_text"] = json.dumps(raw, ensure_ascii=False)[:2000]
 
-            result["status"] = "success"
+                result["status"] = "success"
         except requests.exceptions.Timeout:
             result["error"] = f"请求超时 ({req['timeout']}s)"
             result["latency_ms"] = req["timeout"] * 1000
@@ -392,7 +479,8 @@ class TargetClient:
             else:
                 resp = requests.post(req["url"], headers=req["headers"],
                                      json=req["body"] if isinstance(req["body"], dict) else req["body"],
-                                     timeout=req["timeout"])
+                                     timeout=req["timeout"],
+                                     stream=self.stream_mode)
             result["latency_ms"] = round((time.time() - t0) * 1000)
 
             if resp.status_code >= 400:
@@ -400,21 +488,33 @@ class TargetClient:
                 result["response_text"] = resp.text[:500]
                 return result
 
-            raw = resp.json()
-            result["raw_response"] = raw
+            if self.stream_mode:
+                content, reasoning, last_raw = _read_sse_stream(
+                    resp, self.template.get("response_path", {})
+                )
+                result["response_text"] = content
+                result["reasoning_text"] = reasoning
+                result["raw_response"] = last_raw
+                if content or reasoning:
+                    result["status"] = "success"
+                else:
+                    result["error"] = "SSE stream 无有效内容"
+            else:
+                raw = resp.json()
+                result["raw_response"] = raw
 
-            resp_path = self.template.get("response_path", {})
-            result["response_text"] = _get_by_path(raw, resp_path.get("content", ""))
-            result["reasoning_text"] = _get_by_path(raw, resp_path.get("reasoning", ""))
+                resp_path = self.template.get("response_path", {})
+                result["response_text"] = _get_by_path(raw, resp_path.get("content", ""))
+                result["reasoning_text"] = _get_by_path(raw, resp_path.get("reasoning", ""))
 
-            # Anthropic 格式 fallback：content[0] 可能是 thinking 块，遍历找 text 块
-            if not result["response_text"] and isinstance(raw.get("content"), list):
-                result["response_text"] = _extract_anthropic_text(raw)
+                # Anthropic 格式 fallback：content[0] 可能是 thinking 块，遍历找 text 块
+                if not result["response_text"] and isinstance(raw.get("content"), list):
+                    result["response_text"] = _extract_anthropic_text(raw)
 
-            if not result["response_text"] and not result["reasoning_text"]:
-                result["response_text"] = json.dumps(raw, ensure_ascii=False)[:2000]
+                if not result["response_text"] and not result["reasoning_text"]:
+                    result["response_text"] = json.dumps(raw, ensure_ascii=False)[:2000]
 
-            result["status"] = "success"
+                result["status"] = "success"
         except requests.exceptions.Timeout:
             result["error"] = f"请求超时 ({req['timeout']}s)"
             result["latency_ms"] = req["timeout"] * 1000

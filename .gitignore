@@ -30,6 +30,9 @@ config/agent_home/.claude/backups/
 config/agent_home/.claude/projects/
 config/agent_home/.claude/tasks/
 config/agent_home/.claude/telemetry/
+config/agent_home/.claude/sessions/
+config/agent_home/.claude/session-env/
+config/agent_home/.claude/shell-snapshots/
 config/agent_home/.claude/.last-cleanup
 config/agent_home/.claude.json
 

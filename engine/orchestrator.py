@@ -16,8 +16,9 @@ from engine import claude_agent
 from engine.signal_extractor import analyze_single_result, analyze_batch_results, is_guardrail_blocked
 from engine.response_judge import judge_batch
 from engine.llm_client import LLMClient
-from engine.strategy_arbitrator import decide_next_strategy, check_convergence
+from engine.strategy_arbitrator import decide_next_strategy, check_convergence, get_scan_strategy
 from engine.system_prompt_inferrer import infer_boundary_summary
+from engine.boundary_tracker import record_boundaries, build_matrix, format_boundary_intel
 from engine.variant_generator import generate_variants
 
 logger = logging.getLogger(__name__)
@@ -56,30 +57,38 @@ class RedTeamOrchestrator:
         self.config = config
         self.event_callback = event_callback or (lambda e: None)
 
-        target_config = {
-            "api_url": config["target_api_url"],
-            "api_key": config["target_api_key"],
-            "model": config.get("target_model", "deepseek-chat"),
-            "template_name": config.get("template_name", "openai_compatible"),
-        }
-        if config.get("template_name") == "custom":
-            target_config.update({
-                "method": config.get("method", "POST"),
-                "headers": config.get("headers", {}),
-                "body": config.get("body", {}),
-                "response_path": config.get("response_path", {"content": "", "reasoning": ""}),
-                "timeout": config.get("timeout", 120),
+        if config.get("template_name") == "custom" and config.get("compiled_script"):
+            from engine.script_target_client import ScriptTargetClient
+            self.target_client = ScriptTargetClient({
+                "compiled_script": config["compiled_script"],
+                "script_mode": config.get("script_mode", "single"),
             })
+        else:
+            target_config = {
+                "api_url": config.get("target_api_url", ""),
+                "api_key": config.get("target_api_key", ""),
+                "model": config.get("target_model", "deepseek-chat"),
+                "template_name": config.get("template_name", "openai_compatible"),
+            }
+            if config.get("template_name") == "custom":
+                target_config.update({
+                    "method": config.get("method", "POST"),
+                    "headers": config.get("headers", {}),
+                    "body": config.get("body", {}),
+                    "response_path": config.get("response_path", {"content": "", "reasoning": ""}),
+                    "timeout": config.get("timeout", 120),
+                    "stream": config.get("stream", False),
+                })
 
-        for key in ("temperature", "top_p"):
-            if key in config:
-                target_config[key] = config[key]
+            for key in ("temperature", "top_p"):
+                if key in config:
+                    target_config[key] = config[key]
 
-        self.target_client = TargetClient(target_config)
+            self.target_client = TargetClient(target_config)
 
         # 状态
         self.current_round = 0
-        self.strategy = dict(DEFAULT_STRATEGY)
+        self.strategy = get_scan_strategy()
         self.covered_categories: list[str] = []
         self.stats_history: list[dict] = []
         self.all_rounds: list[dict] = []
@@ -144,6 +153,9 @@ class RedTeamOrchestrator:
                 "created_round": self.current_round,
                 "last_success_round": self.current_round,
             }
+            # 脚本模式：注册 session 供续攻复用
+            if hasattr(self.target_client, "register_session"):
+                self.target_client.register_session(sid, result)
 
         self._enforce_session_limit()
 
@@ -299,25 +311,35 @@ class RedTeamOrchestrator:
                 ],
             })
 
-            # ── Step 7: 边界汇总 (只吃失败响应) ──
+            # ── Step 7: 边界追踪 (结构化矩阵 + 可选LLM摘要) ──
+            # 7a: 记录全部结果到边界矩阵（确定性，零延迟）
+            record_boundaries(analyzed_results, self.current_round)
+            matrix = build_matrix()
+            matrix_intel = format_boundary_intel(matrix)
+            if matrix_intel:
+                self.kb5_summary = matrix_intel
+                self.event_callback({
+                    "event": "kb5_updated",
+                    "round": self.current_round,
+                    "summary": self.kb5_summary,
+                })
+
+            # 7b: 可选LLM补充（保留旧逻辑作为额外战术建议）
             if failed_responses and _parse_bool(self.config.get("agent3_enabled"), default=True):
                 self.event_callback({"event": "boundary_analysis", "round": self.current_round})
-                new_summary = infer_boundary_summary(
+                llm_advice = infer_boundary_summary(
                     agent_api_url=self.config.get("agent_api_url", ""),
                     agent_api_key=self.config.get("agent_api_key", ""),
                     agent_model=self.config.get("agent_model", "deepseek-chat"),
                     failed_responses=failed_responses,
                     target_model_name=self.config.get("target_model", "unknown"),
                     round_num=self.current_round,
-                    prev_summary=self.kb5_summary,
+                    prev_summary="",
                 )
-                if new_summary:
-                    self.kb5_summary = new_summary
-                    self.event_callback({
-                        "event": "kb5_updated",
-                        "round": self.current_round,
-                        "summary": self.kb5_summary,
-                    })
+                if llm_advice and matrix_intel:
+                    self.kb5_summary += f"\nLLM战术建议: {llm_advice}"
+                elif llm_advice:
+                    self.kb5_summary = llm_advice
 
             # ── Step 8: 统计 ──
             bypassed_this_round = stats["bypassed"]
@@ -385,6 +407,7 @@ class RedTeamOrchestrator:
                         "signals": r.get("cot_signals", []),
                         "latencyMs": r.get("latency_ms", 0),
                         "judge_reason": r.get("judge_reason", ""),
+                        "error": r.get("error"),
                     }
                     for r in analyzed_results
                 ],

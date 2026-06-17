@@ -196,6 +196,15 @@ def determine_status(response_text: str, signals: list[str]) -> str:
 
 def analyze_single_result(result: dict) -> dict:
     """分析单条测试结果，提取信号并判定状态"""
+    # 脚本执行错误不做信号分析，保留原始 error 状态
+    if result.get("status") == "error" and result.get("error"):
+        return {
+            **result,
+            "cot_signals": [],
+            "signal_excerpts": [],
+            "signal_count": 0,
+        }
+
     response_text = result.get("response_text", "")
     reasoning_text = result.get("reasoning_text", "")
 
@@ -220,6 +229,7 @@ def analyze_batch_results(results: list[dict]) -> dict:
         "bypassed": sum(1 for r in analyzed if r["status"] == "bypassed"),
         "blocked": sum(1 for r in analyzed if r["status"] == "blocked"),
         "partial": sum(1 for r in analyzed if r["status"] == "partial"),
+        "error": sum(1 for r in analyzed if r["status"] == "error"),
         "signal_distribution": {},
         "primary_signal": None,
         "bypass_rate": "0%",

@@ -4,6 +4,7 @@
 
 import sys
 import os
+import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -139,6 +140,98 @@ def test_bug3_limiter_acquire_timeout_handled():
     assert result["prompt_id"] == "p01"
 
     print("[PASS] Bug 3: limiter acquire 超时时返回明确的错误结果")
+
+
+def test_bug4_custom_streaming_sse_response_is_parsed(monkeypatch):
+    """Bug 4: custom 模板 stream 模式应能正确拼接 SSE 内容"""
+    from engine.target_client import TargetClient
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def iter_lines(self, decode_unicode=True):
+            return iter([
+                'data: {"choices":[{"delta":{"content":"你好","reasoning_content":"思考"}}]}',
+                'data: {"choices":[{"delta":{"content":"世界"}}]}',
+                'data: [DONE]',
+            ])
+
+    def fake_post(url, headers=None, json=None, timeout=None, stream=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        captured["stream"] = stream
+        return FakeResponse()
+
+    monkeypatch.setattr("engine.target_client.requests.post", fake_post)
+
+    client = TargetClient({
+        "api_url": "https://example.com/custom-chat",
+        "template_name": "custom",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "body": {
+            "stream": True,
+            "messages": [{"role": "user", "content": "{{prompt}}"}],
+        },
+        "response_path": {"content": "choices.0.delta.content", "reasoning": "choices.0.delta.reasoning_content"},
+        "timeout": 30,
+        "stream": True,
+    })
+
+    result = client.call_single("测试提示词", prompt_id="p01")
+
+    assert captured["stream"] is True
+    assert captured["json"]["messages"][0]["content"] == "测试提示词"
+    assert result["status"] == "success"
+    assert result["response_text"] == "你好世界"
+    assert result["reasoning_text"] == "思考"
+
+
+def test_bug5_script_target_client_reuses_dual_session_with_history():
+    """Bug 5: 脚本双流量模式应复用首轮创建的 session"""
+    from engine.script_target_client import ScriptTargetClient
+
+    script = textwrap.dedent(
+        """
+        def create_session() -> dict:
+            return {"conversation_id": "conv-001"}
+
+        def call_target(prompt: str, session: dict = None, history: list = None) -> dict:
+            return {
+                "response_text": f"{session['conversation_id']}|{len(history or [])}|{prompt}",
+                "reasoning_text": "",
+                "status": "success",
+                "error": None,
+                "latency_ms": 7,
+            }
+        """
+    )
+
+    client = ScriptTargetClient({
+        "compiled_script": script,
+        "script_mode": "dual",
+    })
+
+    first = client.call_single("第一轮", prompt_id="p01")
+    client.register_session("S-1", first)
+    follow = client.call_with_history(
+        [
+            {"role": "user", "content": "第一轮"},
+            {"role": "assistant", "content": "首轮回复"},
+            {"role": "user", "content": "第二轮追问"},
+        ],
+        session_id="S-1",
+        turn_num=2,
+    )
+
+    assert first["_script_session"]["conversation_id"] == "conv-001"
+    assert follow["status"] == "success"
+    assert follow["response_text"] == "conv-001|2|第二轮追问"
 
 
 if __name__ == "__main__":

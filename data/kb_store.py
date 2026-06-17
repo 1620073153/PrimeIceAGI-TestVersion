@@ -207,6 +207,22 @@ def save_kb5_inference(inference: dict) -> bool:
         return False
 
 
+def save_kb5_boundary_records(records: list[dict]) -> bool:
+    """追加结构化边界记录到 KB5，保留最近 300 条"""
+    try:
+        data = load_kb5()
+        existing = data.get("boundary_records", [])
+        existing.extend(records)
+        if len(existing) > 300:
+            existing = existing[-300:]
+        data["boundary_records"] = existing
+        _atomic_write(_kb_path("kb5"), data)
+        return True
+    except Exception as e:
+        print(f"[kb_store] save_kb5_boundary_records failed: {e}")
+        return False
+
+
 def delete_kb5_inference(inference_id: str) -> bool:
     """删除指定 ID 的推测记录"""
     try:

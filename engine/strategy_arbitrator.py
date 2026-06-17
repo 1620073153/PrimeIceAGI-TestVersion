@@ -79,6 +79,49 @@ def _get_subs_for_cluster(cluster_key: str) -> list[str]:
     return []
 
 
+def get_scan_strategy() -> dict:
+    """
+    首轮广度扫描策略：A-F 每个 cluster 各取 1 个子类，剩余随机补到 10 个。
+    让 prompt-skill 每个子类对应 1 条提示词，快速探测各 cluster 防御强度。
+    """
+    import random
+    categories = _load_categories()
+    clusters = sorted(categories.keys())
+
+    scan_subs = []
+    for cluster_key in clusters:
+        cat = categories[cluster_key]
+        subs = list(cat.get("subcategories", {}).keys())
+        if subs:
+            scan_subs.append(subs[0])
+
+    # 剩余名额从所有子类中随机补（不重复）
+    all_subs = []
+    for cat in categories.values():
+        all_subs.extend(cat.get("subcategories", {}).keys())
+    remaining = [s for s in all_subs if s not in scan_subs]
+    extra_count = max(0, 10 - len(scan_subs))
+    if remaining and extra_count > 0:
+        scan_subs += random.sample(remaining, min(extra_count, len(remaining)))
+
+    concepts = list(_load_concepts().keys())
+    methods = list(_load_methods().keys())
+
+    return {
+        "primary_concept": concepts[0] if concepts else "cognitive_hierarchy_trap",
+        "primary_method": methods[0] if methods else "academic_framing",
+        "primary_cluster": "SCAN",
+        "subcategories": scan_subs[:10],
+        "variant_mode": False,
+        "scan_mode": True,
+        "weights": {
+            "cluster_internal": 0.2,
+            "cross_cluster_probe": 0.7,
+            "new_exploration": 0.1,
+        },
+    }
+
+
 def decide_next_strategy(stats: dict, current_strategy: dict,
                          round_num: int, covered_categories: list[str],
                          successful_prompts: list[dict] | None = None) -> dict:
@@ -100,6 +143,35 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
     current_concept = current_strategy.get("primary_concept", "cognitive_hierarchy_trap")
     current_method = current_strategy.get("primary_method", "academic_framing")
     current_cluster = current_strategy.get("primary_cluster", "A")
+
+    # 扫描轮过渡：从成功的提示词中提取最弱 cluster
+    if current_strategy.get("scan_mode"):
+        if bypassed > 0 and successful_prompts:
+            # 统计每个 cluster 的成功次数，找最弱的（成功最多 = 防御最差）
+            cluster_hits = {}
+            categories = _load_categories()
+            for sp in successful_prompts:
+                cat = sp.get("target_category", "")
+                for cluster_key, cat_data in categories.items():
+                    if cat in cat_data.get("subcategories", {}):
+                        cluster_hits[cluster_key] = cluster_hits.get(cluster_key, 0) + 1
+                        break
+            if cluster_hits:
+                best_cluster = max(cluster_hits, key=cluster_hits.get)
+                return {
+                    "primary_concept": current_concept,
+                    "primary_method": current_method,
+                    "primary_cluster": best_cluster,
+                    "subcategories": _get_subs_for_cluster(best_cluster)[:5],
+                    "variant_mode": True,
+                    "successful_templates": [
+                        {"prompt_id": sp.get("prompt_id", ""), "prompt_text": sp.get("prompt_text", "")}
+                        for sp in successful_prompts[:3]
+                    ],
+                    "weights": {"cluster_internal": 0.7, "cross_cluster_probe": 0.2, "new_exploration": 0.1},
+                }
+        # 扫描轮全失败 → 从 A 开始正常轮转
+        current_cluster = "A"
 
     # 计算未覆盖类别
     categories = _load_categories()

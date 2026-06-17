@@ -503,6 +503,7 @@ header h1{
 .badge-block{background:var(--danger-dim);color:var(--danger)}
 .badge-partial{background:var(--warning-dim);color:var(--warning)}
 .badge-guardrail{background:var(--warning-dim);color:var(--warning)}
+.badge-error{background:#2d1f1f;color:#e74c3c}
 .badge-concept{background:var(--accent-dim);color:var(--accent)}
 .badge-method{background:var(--purple-dim);color:var(--purple)}
 .badge-continue{background:var(--purple-dim);color:var(--purple)}

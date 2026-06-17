@@ -52,18 +52,72 @@
       <div class="tab-panel" id="tab-target">
         <div class="form-grid">
           <div class="form-group"><label>API 模板</label><select id="template_name"><option value="openai_compatible">OpenAI 兼容格式</option><option value="anthropic_compatible">Anthropic 兼容格式</option><option value="custom">自定义模板</option></select></div>
+        </div>
+        <div class="form-grid" id="target-standard-fields">
           <div class="form-group"><label>API 地址</label><input id="target_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"></div>
           <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="target_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="target_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
           <div class="form-group"><label>模型名</label><input id="target_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
         </div>
         <div id="custom-template-section" style="display:none;margin-top:16px">
-          <div class="form-grid">
-            <div class="form-group"><label>HTTP Method</label><select id="custom_method"><option value="POST">POST</option><option value="GET">GET</option></select></div>
-            <div class="form-group"><label>超时 (秒)</label><input id="custom_timeout" type="number" value="120" min="10" max="600"></div>
-            <div class="form-group full"><label>Headers (JSON)</label><textarea id="custom_headers" placeholder='{"Authorization":"Bearer {{api_key}}"}'></textarea></div>
-            <div class="form-group full"><label>Body (JSON)</label><textarea id="custom_body" placeholder='{"model":"{{model}}","messages":[{"role":"user","content":"{{prompt}}"}]}'></textarea></div>
-            <div class="form-group"><label>响应内容路径</label><input id="custom_content_path" placeholder="choices.0.message.content"></div>
-            <div class="form-group"><label>思考过程路径</label><input id="custom_reasoning_path" placeholder="choices.0.message.reasoning_content"></div>
+          <div class="form-group full" style="margin-bottom:12px">
+            <label>自定义模式</label>
+            <select id="custom_sub_mode" onchange="toggleCustomSubMode()">
+              <option value="simple">简单模式（智能解析填充字段）</option>
+              <option value="script">脚本模式（LLM 编译执行脚本）</option>
+            </select>
+          </div>
+
+          <!-- 简单模式：原有的 curl 解析 + JSON 字段 -->
+          <div id="custom-simple-mode">
+            <div class="form-group full" style="margin-bottom:12px">
+              <label>粘贴请求（支持 curl / 抓包 raw HTTP / JSON）</label>
+              <textarea id="curl_input" rows="5" placeholder="支持三种格式：&#10;1. curl -X POST https://... -H &quot;Auth: ...&quot; -d '{...}'&#10;2. POST /api/chat HTTP/1.1&#10;   Host: example.com&#10;   ...&#10;3. 纯 JSON body"></textarea>
+              <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-parse-curl">智能解析</button>
+                <span id="curl-parse-status" class="hint"></span>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="form-group"><label>HTTP Method</label><select id="custom_method"><option value="POST">POST</option><option value="GET">GET</option></select></div>
+              <div class="form-group"><label>超时 (秒)</label><input id="custom_timeout" type="number" value="120" min="10" max="600"></div>
+              <div class="form-group full"><label>Headers (JSON)</label><textarea id="custom_headers" placeholder='{"Authorization":"Bearer {{api_key}}"}'></textarea></div>
+              <div class="form-group full"><label>Body (JSON)</label><textarea id="custom_body" placeholder='{"model":"{{model}}","messages":[{"role":"user","content":"{{prompt}}"}]}'></textarea></div>
+              <div class="form-group"><label>响应内容路径</label><input id="custom_content_path" placeholder="choices.0.message.content"></div>
+              <div class="form-group"><label>思考过程路径</label><input id="custom_reasoning_path" placeholder="choices.0.message.reasoning_content"></div>
+            </div>
+          </div>
+
+          <!-- 脚本模式：流量包 + LLM 编译 -->
+          <div id="custom-script-mode" style="display:none">
+            <div class="form-group full" style="margin-bottom:8px">
+              <label>流量包模式</label>
+              <select id="script_packet_mode" onchange="toggleDualPacket()">
+                <option value="single">单流量包（同 session 多 prompt）</option>
+                <option value="dual">双流量包（每路独立 session）</option>
+              </select>
+            </div>
+
+            <div style="border-left:3px solid var(--accent);padding-left:12px;margin-bottom:12px">
+              <div class="form-group full"><label>提示词请求包</label><textarea id="script_prompt_packet" rows="6" placeholder="粘贴发送提示词的请求（curl / raw HTTP）"></textarea></div>
+              <div class="form-group full"><label>响应示例（可选）</label><textarea id="script_prompt_response" rows="3" placeholder="粘贴该请求的响应，帮助 LLM 理解响应格式"></textarea></div>
+            </div>
+
+            <div id="dual-packet-section" style="display:none;border-left:3px solid var(--warning);padding-left:12px;margin-bottom:12px">
+              <div class="form-group full"><label>会话创建请求包</label><textarea id="script_session_packet" rows="5" placeholder="粘贴创建 session 的请求"></textarea></div>
+              <div class="form-group full"><label>响应示例（可选）</label><textarea id="script_session_response" rows="3" placeholder="粘贴该请求的响应，帮助 LLM 提取 session 标识"></textarea></div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-compile-script">编译脚本</button>
+              <span id="compile-status" class="hint"></span>
+            </div>
+
+            <div id="script-preview-section" style="display:none">
+              <label>生成的脚本（确认后开始测试）</label>
+              <pre id="script-preview" style="background:var(--bg-alt);padding:12px;border-radius:6px;max-height:300px;overflow:auto;font-size:12px;white-space:pre-wrap"></pre>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-confirm-script" style="margin-top:8px">确认使用此脚本</button>
+              <span id="script-confirm-status" class="hint" style="margin-left:8px"></span>
+            </div>
           </div>
         </div>
       </div>

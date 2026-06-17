@@ -13,6 +13,7 @@ from data.kb_store import (
     load_kb,
     load_kb5,
     save_kb,
+    save_kb5_boundary_records,
     save_kb5_inference,
 )
 
@@ -98,6 +99,28 @@ class TestEnsureSeedFiles:
 
 
 class TestKb5Consistency:
+    def test_save_kb5_boundary_records_persists_recent_records(self, tmp_path):
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            records = [
+                {
+                    "category": f"A-{i}",
+                    "concept": "学术伪装",
+                    "method": "变体",
+                    "strategy_tags": [f"策略{i}"],
+                    "outcome": "blocked",
+                    "round": i,
+                    "ts": i,
+                }
+                for i in range(305)
+            ]
+            result = save_kb5_boundary_records(records)
+            loaded = load_kb5()
+
+        assert result is True
+        assert len(loaded["boundary_records"]) == 300
+        assert loaded["boundary_records"][0]["round"] == 5
+        assert loaded["boundary_records"][-1]["round"] == 304
+
     def test_kb5_append_load_and_delete_use_same_file(self, tmp_path):
         with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
             result = save_kb5_inference({"inference_id": "inf_1", "summary": "边界"})
@@ -153,3 +176,32 @@ class TestKb5Consistency:
         assert status == "deleted"
         assert not legacy.exists()
         assert not canonical.exists()
+
+    def test_boundary_tracker_builds_best_outcome_matrix(self, tmp_path):
+        from engine.boundary_tracker import build_matrix
+
+        canonical = tmp_path / "kb5.json"
+        canonical.write_text(json.dumps({
+            "inferences": [],
+            "boundary_records": [
+                {
+                    "category": "A-1",
+                    "concept": "角色扮演",
+                    "method": "学术伪装",
+                    "strategy_tags": ["策略2", "策略1"],
+                    "outcome": "blocked",
+                },
+                {
+                    "category": "A-1",
+                    "concept": "角色扮演",
+                    "method": "学术伪装",
+                    "strategy_tags": ["策略1", "策略2"],
+                    "outcome": "bypassed",
+                },
+            ],
+        }, ensure_ascii=False), encoding="utf-8")
+
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            matrix = build_matrix()
+
+        assert matrix["A-1"]["策略1+策略2"] == "bypassed"

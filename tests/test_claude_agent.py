@@ -17,7 +17,7 @@ class TestBuildMessage:
             "primary_method": "学术伪装",
         }
         msg = _build_prompt_skill_message(round_num=1, strategy=strategy)
-        assert "prompt-skill" in msg
+        assert "模式A" in msg
         assert "A-1" in msg
         assert "角色扮演" in msg
         assert "JSON数组" in msg

@@ -27,8 +27,12 @@ def probe_target():
     model = data.get("model", "deepseek-chat")
     template_name = data.get("template_name", "openai_compatible")
 
-    if not api_url or not api_key:
-        return jsonify({"reachable": False, "error": "缺少 API 地址或 Key"})
+    if template_name == "custom":
+        if not api_url:
+            return jsonify({"reachable": False, "error": "自定义模板请填写 API 地址，或使用脚本模式的试射功能"})
+    else:
+        if not api_url or not api_key:
+            return jsonify({"reachable": False, "error": "缺少 API 地址或 Key"})
 
     if template_name == "custom":
         method = data.get("method", "POST")

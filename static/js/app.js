@@ -263,7 +263,95 @@ function applyTheme(t) { document.body.classList.toggle('theme-light', t === 'li
 function toggleTheme() { applyTheme(getTheme() === 'dark' ? 'light' : 'dark'); }
 
 /* ── Config Build ── */
-function toggleCustomTemplate() { document.getElementById('custom-template-section').style.display = document.getElementById('template_name').value === 'custom' ? 'block' : 'none'; }
+function toggleCustomTemplate() {
+  var isCustom = document.getElementById('template_name').value === 'custom';
+  document.getElementById('custom-template-section').style.display = isCustom ? 'block' : 'none';
+  document.getElementById('target-standard-fields').style.display = isCustom ? 'none' : '';
+}
+
+function toggleCustomSubMode() {
+  var mode = document.getElementById('custom_sub_mode').value;
+  document.getElementById('custom-simple-mode').style.display = mode === 'simple' ? 'block' : 'none';
+  document.getElementById('custom-script-mode').style.display = mode === 'script' ? 'block' : 'none';
+}
+
+function toggleDualPacket() {
+  var mode = document.getElementById('script_packet_mode').value;
+  document.getElementById('dual-packet-section').style.display = mode === 'dual' ? 'block' : 'none';
+}
+
+function parseCurl() {
+  var curlText = document.getElementById('curl_input').value.trim();
+  var statusEl = document.getElementById('curl-parse-status');
+  if (!curlText) { statusEl.textContent = '请先粘贴 curl 命令'; return; }
+  statusEl.textContent = '解析中...';
+  var payload = { curl: curlText, use_llm: true, agent_api_url: document.getElementById('agent_api_url').value.trim(), agent_api_key: document.getElementById('agent_api_key').value.trim(), agent_model: document.getElementById('agent_model').value.trim() || 'deepseek-chat' };
+  fetch('/api/parse-curl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok) { statusEl.textContent = d.error || '解析失败'; statusEl.style.color = 'var(--danger)'; return; }
+      var cfg = d.data;
+      document.getElementById('custom_method').value = cfg.method || 'POST';
+      document.getElementById('custom_timeout').value = cfg.timeout || 120;
+      document.getElementById('custom_headers').value = JSON.stringify(cfg.headers || {}, null, 2);
+      document.getElementById('custom_body').value = JSON.stringify(cfg.body || {}, null, 2);
+      document.getElementById('custom_content_path').value = (cfg.response_path || {}).content || '';
+      document.getElementById('custom_reasoning_path').value = (cfg.response_path || {}).reasoning || '';
+      document.getElementById('target_api_url').value = cfg.api_url || '';
+      var method = cfg.prompt_slot_method || 'unknown';
+      var label = method === 'rule' ? '规则匹配' : method === 'llm' ? 'LLM 辅助' : '需手动标注 {{prompt}}';
+      statusEl.textContent = '解析完成 (' + label + ')';
+      statusEl.style.color = method === 'manual' ? 'var(--warning)' : 'var(--success)';
+    })
+    .catch(function (e) { statusEl.textContent = '请求失败: ' + e.message; statusEl.style.color = 'var(--danger)'; });
+}
+
+/* ── 脚本模式 ── */
+var _compiledScript = '';
+var _scriptMode = 'single';
+
+function compileScript() {
+  var statusEl = document.getElementById('compile-status');
+  var promptPacket = document.getElementById('script_prompt_packet').value.trim();
+  if (!promptPacket) { statusEl.textContent = '请先粘贴提示词请求包'; statusEl.style.color = 'var(--danger)'; return; }
+
+  var agentUrl = document.getElementById('agent_api_url').value.trim();
+  var agentKey = document.getElementById('agent_api_key').value.trim();
+  if (!agentUrl || !agentKey) { statusEl.textContent = '请先配置辅助模型'; statusEl.style.color = 'var(--danger)'; return; }
+
+  statusEl.textContent = '编译中（LLM 生成脚本）...';
+  statusEl.style.color = '';
+
+  var payload = {
+    prompt_packet: promptPacket,
+    prompt_response: document.getElementById('script_prompt_response').value.trim(),
+    session_packet: document.getElementById('script_session_packet') ? document.getElementById('script_session_packet').value.trim() : '',
+    session_response: document.getElementById('script_session_response') ? document.getElementById('script_session_response').value.trim() : '',
+    agent_api_url: agentUrl,
+    agent_api_key: agentKey,
+    agent_model: document.getElementById('agent_model').value.trim() || 'deepseek-chat'
+  };
+
+  fetch('/api/compile-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok) { statusEl.textContent = d.error || '编译失败'; statusEl.style.color = 'var(--danger)'; return; }
+      _compiledScript = d.data.script;
+      _scriptMode = d.data.mode;
+      document.getElementById('script-preview').textContent = d.data.script;
+      document.getElementById('script-preview-section').style.display = 'block';
+      statusEl.textContent = '编译成功 (' + (d.data.mode === 'dual' ? '双流量包' : '单流量包') + ')';
+      statusEl.style.color = 'var(--success)';
+    })
+    .catch(function (e) { statusEl.textContent = '请求失败: ' + e.message; statusEl.style.color = 'var(--danger)'; });
+}
+
+function confirmScript() {
+  var el = document.getElementById('script-confirm-status');
+  if (!_compiledScript) { el.textContent = '无脚本'; return; }
+  el.textContent = '已确认，可开始测试';
+  el.style.color = 'var(--success)';
+}
 
 function buildConfig() {
   var tn = document.getElementById('template_name').value;
@@ -287,11 +375,18 @@ function buildConfig() {
   var topP = parseFloat(document.getElementById('target_top_p').value);
   if (!isNaN(topP)) cfg.top_p = topP;
   if (tn === 'custom') {
-    cfg.method = document.getElementById('custom_method').value;
-    cfg.timeout = parseInt(document.getElementById('custom_timeout').value) || 120;
-    try { cfg.headers = JSON.parse(document.getElementById('custom_headers').value || '{}'); } catch (e) { cfg.headers = {}; }
-    try { cfg.body = JSON.parse(document.getElementById('custom_body').value || '{}'); } catch (e) { cfg.body = {}; }
-    cfg.response_path = { content: document.getElementById('custom_content_path').value.trim(), reasoning: document.getElementById('custom_reasoning_path').value.trim() };
+    var subMode = document.getElementById('custom_sub_mode').value;
+    if (subMode === 'script' && _compiledScript) {
+      cfg.compiled_script = _compiledScript;
+      cfg.script_mode = _scriptMode;
+    } else {
+      cfg.method = document.getElementById('custom_method').value;
+      cfg.timeout = parseInt(document.getElementById('custom_timeout').value) || 120;
+      try { cfg.headers = JSON.parse(document.getElementById('custom_headers').value || '{}'); } catch (e) { cfg.headers = {}; }
+      try { cfg.body = JSON.parse(document.getElementById('custom_body').value || '{}'); } catch (e) { cfg.body = {}; }
+      cfg.response_path = { content: document.getElementById('custom_content_path').value.trim(), reasoning: document.getElementById('custom_reasoning_path').value.trim() };
+      if (cfg.body && cfg.body.stream) cfg.stream = true;
+    }
   }
   return cfg;
 }
@@ -300,6 +395,10 @@ function buildConfig() {
 function probeTarget() {
   var s = document.getElementById('probe-status'); s.textContent = '检测中...';
   var cfg = buildConfig();
+  if (cfg.compiled_script) {
+    testFireScript(s);
+    return;
+  }
   var probeBody = { api_url: cfg.target_api_url, api_key: cfg.target_api_key, model: cfg.target_model, template_name: cfg.template_name, method: cfg.method, headers: cfg.headers, body: cfg.body };
   if (cfg.temperature !== undefined) probeBody.temperature = cfg.temperature;
   if (cfg.top_p !== undefined) probeBody.top_p = cfg.top_p;
@@ -309,9 +408,49 @@ function probeTarget() {
     .catch(function () { s.textContent = '请求失败'; s.style.color = 'var(--danger)'; });
 }
 
+function testFireScript(statusEl) {
+  if (!_compiledScript) { statusEl.textContent = '请先编译脚本'; statusEl.style.color = 'var(--danger)'; return; }
+  statusEl.textContent = '试射中（发送测试请求）...';
+  var payload = {
+    compiled_script: _compiledScript,
+    script_mode: _scriptMode,
+    test_prompt: '你好',
+    agent_api_url: document.getElementById('agent_api_url').value.trim(),
+    agent_api_key: document.getElementById('agent_api_key').value.trim(),
+    agent_model: document.getElementById('agent_model').value.trim() || 'deepseek-chat'
+  };
+  fetch('/api/test-fire', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok) { statusEl.textContent = '试射失败: ' + (d.error || '未知错误'); statusEl.style.color = 'var(--danger)'; return; }
+      var r = d.data;
+      if (r.response_text) {
+        statusEl.textContent = '试射成功 (' + r.latency_ms + 'ms)';
+        statusEl.style.color = 'var(--success)';
+        document.getElementById('script-preview').textContent = _compiledScript + '\n\n/* ── 试射结果 ──\n响应: ' + r.response_text.substring(0, 200) + '\n*/';
+      } else if (r.fix_applied) {
+        _compiledScript = r.fixed_script;
+        statusEl.textContent = '提取路径已修正，再次试射验证';
+        statusEl.style.color = 'var(--warning)';
+        document.getElementById('script-preview').textContent = r.fixed_script;
+      } else {
+        statusEl.textContent = '试射无响应: ' + (r.error || '提取路径可能有误');
+        statusEl.style.color = 'var(--danger)';
+        if (r.raw_response_sample) {
+          document.getElementById('script-preview').textContent = _compiledScript + '\n\n/* ── 原始响应（提取失败）──\n' + r.raw_response_sample.substring(0, 500) + '\n*/';
+        }
+      }
+    })
+    .catch(function (e) { statusEl.textContent = '试射请求失败: ' + e.message; statusEl.style.color = 'var(--danger)'; });
+}
+
 function startTest() {
   var config = buildConfig();
-  if (!config.target_api_url || !config.target_api_key) { toast('请填写待测模型的 API 地址和 Key', 'error'); return; }
+  if (config.compiled_script) {
+    // 脚本模式不需要 target_api_url/key
+  } else if (!config.target_api_url || (!config.target_api_key && config.template_name !== 'custom')) {
+    toast('请填写待测模型的 API 地址和 Key', 'error'); return;
+  }
   App.allRounds = []; App.currentRound = 0;
   document.getElementById('rounds-container').innerHTML = '';
   document.getElementById('final-section').style.display = 'none';
@@ -387,10 +526,11 @@ function renderRoundCard(e) {
 }
 
 function renderDetailItem(d) {
-  var sm = { bypassed: { cls: 'bypassed', text: '绕过', badge: 'badge-bypass' }, blocked: { cls: 'blocked', text: '拒绝', badge: 'badge-block' }, partial: { cls: 'partial', text: '部分', badge: 'badge-partial' }, guardrail_blocked: { cls: 'blocked', text: '护栏', badge: 'badge-guardrail' } };
+  var sm = { bypassed: { cls: 'bypassed', text: '绕过', badge: 'badge-bypass' }, blocked: { cls: 'blocked', text: '拒绝', badge: 'badge-block' }, partial: { cls: 'partial', text: '部分', badge: 'badge-partial' }, guardrail_blocked: { cls: 'blocked', text: '护栏', badge: 'badge-guardrail' }, error: { cls: 'blocked', text: '错误', badge: 'badge-error' } };
   var info = sm[d.jailbreakStatus] || sm['partial'];
   var typeTag = d.promptType === 'continue' ? '<span class="badge badge-continue">续攻·' + escHtml(d.sessionId || '') + '</span>' : '';
-  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(d.concept || '') + '</span><span>' + (d.latencyMs || 0) + 'ms</span>' + (d.judge_reason ? '<span title="' + escHtml(d.judge_reason) + '">裁判</span>' : '') + '</div><div class="result-text"><span class="label-text">Prompt</span><br>' + escLong(d.promptText || '', 300) + '</div><div class="result-text" style="margin-top:6px"><span class="label-text">Response</span><br>' + escLong(d.modelResponse || '', 400) + '</div></div>';
+  var errorLine = d.error ? '<div class="result-text" style="margin-top:6px;color:#e74c3c"><span class="label-text">Error</span><br>' + escHtml(d.error) + '</div>' : '';
+  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(d.concept || '') + '</span><span>' + (d.latencyMs || 0) + 'ms</span>' + (d.judge_reason ? '<span title="' + escHtml(d.judge_reason) + '">裁判</span>' : '') + '</div><div class="result-text"><span class="label-text">Prompt</span><br>' + escLong(d.promptText || '', 300) + '</div><div class="result-text" style="margin-top:6px"><span class="label-text">Response</span><br>' + escLong(d.modelResponse || '', 400) + '</div>' + errorLine + '</div>';
 }
 
 function updateFinalSummary() {
@@ -436,6 +576,11 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('btn-stop').addEventListener('click', stopTest);
   document.querySelector('[data-action="probe"]').addEventListener('click', probeTarget);
   document.getElementById('template_name').addEventListener('change', toggleCustomTemplate);
+  document.getElementById('btn-parse-curl').addEventListener('click', parseCurl);
+  var compileBtn = document.getElementById('btn-compile-script');
+  if (compileBtn) compileBtn.addEventListener('click', compileScript);
+  var confirmBtn = document.getElementById('btn-confirm-script');
+  if (confirmBtn) confirmBtn.addEventListener('click', confirmScript);
   document.getElementById('btn-load-claude-cfg').addEventListener('click', loadClaudeCfg);
   document.getElementById('btn-save-claude-cfg').addEventListener('click', saveClaudeCfg);
   document.getElementById('btn-sync-aux').addEventListener('click', syncToAux);

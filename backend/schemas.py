@@ -8,16 +8,23 @@ class ValidationError(Exception):
 
 
 def validate_test_config(config: dict) -> dict:
-    required = ["target_api_url", "target_api_key"]
-    missing = [k for k in required if not config.get(k)]
-    if missing:
-        raise ValidationError(f"缺少必填参数: {', '.join(missing)}")
+    # 脚本模式：有 compiled_script 就跳过传统校验
+    if config.get("template_name") == "custom" and config.get("compiled_script"):
+        config.setdefault("target_api_url", "script://compiled")
+        config.setdefault("max_rounds", 5)
+        config.setdefault("cooldown_no_new", 2)
+        return config
+
+    if not config.get("target_api_url"):
+        raise ValidationError("请填写待测模型的 API 地址")
+
+    # 非自定义模板需要 API Key（标准 OpenAI/Anthropic 格式必须有 key）
+    if config.get("template_name") != "custom" and not config.get("target_api_key"):
+        raise ValidationError("请填写待测模型的 API Key")
 
     if config.get("template_name") == "custom":
-        if not config.get("headers"):
-            raise ValidationError("自定义模板模式下需要填写请求 Headers")
-        if not config.get("body"):
-            raise ValidationError("自定义模板模式下需要填写请求 Body")
+        if not config.get("body") and not config.get("compiled_script"):
+            raise ValidationError("自定义模板模式下需要填写请求 Body 或编译脚本")
 
     config.setdefault("target_model", "deepseek-chat")
     config.setdefault("max_rounds", 5)
