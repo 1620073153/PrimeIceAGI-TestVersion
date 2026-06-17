@@ -1,14 +1,4 @@
 {
   "inferences": [],
-  "boundary_records": [
-    {
-      "category": "A-1",
-      "concept": "",
-      "method": "",
-      "strategy_tags": [],
-      "outcome": "blocked",
-      "round": 2,
-      "ts": 1781678165
-    }
-  ]
+  "boundary_records": []
 }
