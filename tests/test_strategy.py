@@ -49,3 +49,76 @@ class TestDecideStrategy:
             covered_categories=[],
         )
         assert strategy["primary_concept"] != current["primary_concept"] or strategy["primary_method"] != current["primary_method"]
+
+    def test_success_does_not_convert_all_new_attack_slots_to_variants(self):
+        stats = {"bypassed": 3, "blocked": 5, "partial": 2, "primary_signal": None, "signal_distribution": {}}
+        current = {
+            "primary_concept": "cognitive_hierarchy_trap",
+            "primary_method": "academic_framing",
+            "primary_cluster": "B",
+            "subcategories": ["B-1", "B-2", "B-3"],
+            "scan_mode": False,
+        }
+        successful_prompts = [
+            {
+                "prompt_id": "p01",
+                "prompt_text": "should not be copied",
+                "target_category": "B-1",
+                "strategy_tags": ["role_play", "authority_framing"],
+                "concept": "role_play",
+                "method": "authority_framing",
+            },
+            {
+                "prompt_id": "p02",
+                "prompt_text": "should not be copied either",
+                "target_category": "B-2",
+                "strategy_tags": ["indirect_goal", "academic_framing"],
+                "concept": "indirect_goal",
+                "method": "academic_framing",
+            },
+        ]
+
+        strategy = decide_next_strategy(
+            stats=stats,
+            current_strategy=current,
+            round_num=3,
+            covered_categories=["B-1", "B-2"],
+            successful_prompts=successful_prompts,
+        )
+
+        assert strategy["variant_mode"] is True
+        assert strategy["new_attack_mix"]["success_neighbor_slots"] <= 3
+        assert strategy["new_attack_mix"]["fresh_exploration_slots"] >= 5
+        assert strategy["new_attack_mix"]["cross_cluster_slots"] >= 2
+
+    def test_successful_templates_are_tag_only_not_full_prompt_copy(self):
+        stats = {"bypassed": 1, "blocked": 8, "partial": 1, "primary_signal": None, "signal_distribution": {}}
+        current = {
+            "primary_concept": "cognitive_hierarchy_trap",
+            "primary_method": "academic_framing",
+            "primary_cluster": "A",
+            "subcategories": ["A-1", "A-2"],
+            "scan_mode": False,
+        }
+        successful_prompts = [
+            {
+                "prompt_id": "p01",
+                "prompt_text": "sensitive full prompt should not be reused",
+                "target_category": "A-1",
+                "strategy_tags": ["persona_masking", "narrative_shell"],
+                "concept": "persona_masking",
+                "method": "narrative_shell",
+            }
+        ]
+
+        strategy = decide_next_strategy(
+            stats=stats,
+            current_strategy=current,
+            round_num=2,
+            covered_categories=["A-1"],
+            successful_prompts=successful_prompts,
+        )
+
+        assert strategy["successful_templates"][0]["target_category"] == "A-1"
+        assert strategy["successful_templates"][0]["strategy_tags"] == ["persona_masking", "narrative_shell"]
+        assert "prompt_text" not in strategy["successful_templates"][0]

@@ -39,6 +39,38 @@ class TestBuildMessage:
         assert "上轮反馈" in msg
         assert "被拦截" in msg
 
+    def test_prompt_skill_message_includes_mix_constraints_for_new_attacks(self):
+        strategy = {
+            "subcategories": ["B-3", "C-1", "D-2", "E-1"],
+            "primary_concept": "cognitive_hierarchy_trap",
+            "primary_method": "academic_framing",
+            "new_attack_mix": {
+                "total_slots": 10,
+                "success_neighbor_slots": 3,
+                "cross_cluster_slots": 2,
+                "fresh_exploration_slots": 5,
+            },
+            "successful_templates": [
+                {"target_category": "B-1", "strategy_tags": ["role_play", "authority_framing"]}
+            ],
+            "neighbor_subcategories": ["B-3", "B-4"],
+            "cross_cluster_subcategories": ["C-1", "D-2"],
+            "fresh_subcategories": ["E-1", "F-2", "A-3"],
+        }
+
+        message = _build_prompt_skill_message(
+            round_num=3,
+            strategy=strategy,
+            kb5_summary="intel",
+            history_feedback="feedback",
+            successful_prompts=strategy["successful_templates"],
+        )
+
+        assert "最多3条" in message
+        assert "至少5条必须来自全新探索" in message
+        assert "不得续写已有对话" in message
+        assert "只参考手法标签，不复用历史提示词原文" in message
+
 
 class TestParsePromptList:
     def test_parse_json_array(self):

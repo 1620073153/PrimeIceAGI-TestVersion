@@ -465,6 +465,19 @@ class RedTeamOrchestrator:
 
     # ── 辅助方法 ──
 
+    def _summarize_successes_for_new_attack(self, successful: list[dict]) -> list[dict]:
+        summarized = []
+        for item in successful[:3]:
+            summarized.append({
+                "prompt_id": item.get("prompt_id", ""),
+                "target_category": item.get("target_category", ""),
+                "strategy_tags": list(item.get("strategy_tags", []))[:4],
+                "concept": item.get("concept", ""),
+                "method": item.get("method", ""),
+                "type": item.get("type", "new"),
+            })
+        return summarized
+
     def _generate_all_prompts(self) -> tuple[list[dict], list[dict]]:
         """并行生成新攻 + 续攻提示词"""
         new_prompts = []
@@ -497,38 +510,23 @@ class RedTeamOrchestrator:
                 ],
             })
 
-        if self.strategy.get("variant_mode") and self.strategy.get("successful_templates"):
-            new_prompts = generate_variants(
-                self.strategy["successful_templates"],
-                self.strategy.get("subcategories", ["A-1", "A-2"]),
-                count=10,
-            )
-            if sessions_for_cont:
-                try:
-                    cont_prompts = claude_agent.generate_continuations(
-                        active_sessions=sessions_for_cont,
-                        kb5_summary=self.kb5_summary,
-                        timeout=180.0,
-                    )
-                except Exception as e:
-                    logger.warning(f"续攻生成失败: {e}")
+        success_refs = self._summarize_successes_for_new_attack(self.all_successful_prompts[-5:] if self.all_successful_prompts else [])
 
-        else:
-            try:
-                new_prompts, cont_prompts = claude_agent.generate_parallel(
-                    round_num=self.current_round,
-                    strategy=self.strategy,
-                    kb5_summary=self.kb5_summary,
-                    history_feedback=self.history_feedback,
-                    successful_prompts=self.all_successful_prompts[-5:] if self.all_successful_prompts else None,
-                    active_sessions=sessions_for_cont if sessions_for_cont else None,
-                    timeout=180.0,
-                    settings_path=self._claude_agent_settings,
-                )
-                self.event_callback({"event": "info", "round": self.current_round, "message": f"智能体生成完成: {len(new_prompts)}新攻 + {len(cont_prompts)}续攻"})
-            except Exception as e:
-                logger.error(f"Claude Code 智能体失败: {e}")
-                self.event_callback({"event": "error", "round": self.current_round, "message": f"提示词生成失败: {str(e)[:200]}"})
+        try:
+            new_prompts, cont_prompts = claude_agent.generate_parallel(
+                round_num=self.current_round,
+                strategy=self.strategy,
+                kb5_summary=self.kb5_summary,
+                history_feedback=self.history_feedback,
+                successful_prompts=success_refs if success_refs else None,
+                active_sessions=sessions_for_cont if sessions_for_cont else None,
+                timeout=180.0,
+                settings_path=self._claude_agent_settings,
+            )
+            self.event_callback({"event": "info", "round": self.current_round, "message": f"智能体生成完成: {len(new_prompts)}新攻 + {len(cont_prompts)}续攻"})
+        except Exception as e:
+            logger.error(f"Claude Code 智能体失败: {e}")
+            self.event_callback({"event": "error", "round": self.current_round, "message": f"提示词生成失败: {str(e)[:200]}"})
 
         return new_prompts, cont_prompts
 

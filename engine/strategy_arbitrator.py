@@ -79,6 +79,54 @@ def _get_subs_for_cluster(cluster_key: str) -> list[str]:
     return []
 
 
+def _dedupe_keep_order(items: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _build_new_attack_mix(
+    total_slots: int = 10,
+    success_neighbor_slots: int = 3,
+    cross_cluster_slots: int = 2,
+) -> dict:
+    success_neighbor_slots = min(success_neighbor_slots, total_slots)
+    cross_cluster_slots = min(cross_cluster_slots, max(0, total_slots - success_neighbor_slots))
+    fresh_exploration_slots = max(0, total_slots - success_neighbor_slots - cross_cluster_slots)
+    return {
+        "total_slots": total_slots,
+        "success_neighbor_slots": success_neighbor_slots,
+        "cross_cluster_slots": cross_cluster_slots,
+        "fresh_exploration_slots": fresh_exploration_slots,
+    }
+
+
+def _sanitize_successful_templates(successful_prompts: list[dict] | None) -> list[dict]:
+    sanitized = []
+    for sp in (successful_prompts or [])[:3]:
+        sanitized.append({
+            "prompt_id": sp.get("prompt_id", ""),
+            "target_category": sp.get("target_category", ""),
+            "strategy_tags": list(sp.get("strategy_tags", []))[:4],
+            "concept": sp.get("concept", ""),
+            "method": sp.get("method", ""),
+        })
+    return sanitized
+
+
+def _get_cross_cluster_subcategories(current_cluster: str, covered_categories: list[str]) -> list[str]:
+    clusters = _load_clusters()
+    cross_clusters = clusters.get(current_cluster, {}).get("cross_cluster", [])
+    cross_subs = []
+    for cluster in cross_clusters:
+        cross_subs.extend(_get_subs_for_cluster(cluster))
+    return [s for s in _dedupe_keep_order(cross_subs) if s not in covered_categories]
+
+
 def get_scan_strategy() -> dict:
     """
     首轮广度扫描策略：A-F 每个 cluster 各取 1 个子类，剩余随机补到 10 个。
@@ -158,16 +206,27 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
                         break
             if cluster_hits:
                 best_cluster = max(cluster_hits, key=cluster_hits.get)
+                neighbor_subcategories = _get_subs_for_cluster(best_cluster)[:5]
+                cross_subcategories = _get_cross_cluster_subcategories(best_cluster, covered_categories)[:4]
+                fresh_subcategories = [s for s in uncovered if s not in neighbor_subcategories and s not in cross_subcategories][:8]
+                mix = _build_new_attack_mix(total_slots=10, success_neighbor_slots=3, cross_cluster_slots=2)
+                combined = (
+                    neighbor_subcategories[:mix["success_neighbor_slots"]]
+                    + cross_subcategories[:mix["cross_cluster_slots"]]
+                    + fresh_subcategories[:mix["fresh_exploration_slots"]]
+                )
                 return {
                     "primary_concept": current_concept,
                     "primary_method": current_method,
                     "primary_cluster": best_cluster,
-                    "subcategories": _get_subs_for_cluster(best_cluster)[:5],
+                    "subcategories": _dedupe_keep_order(combined)[:10],
                     "variant_mode": True,
-                    "successful_templates": [
-                        {"prompt_id": sp.get("prompt_id", ""), "prompt_text": sp.get("prompt_text", "")}
-                        for sp in successful_prompts[:3]
-                    ],
+                    "successful_templates": _sanitize_successful_templates(successful_prompts),
+                    "new_attack_mix": mix,
+                    "focus_cluster": best_cluster,
+                    "neighbor_subcategories": neighbor_subcategories,
+                    "cross_cluster_subcategories": cross_subcategories,
+                    "fresh_subcategories": fresh_subcategories,
                     "weights": {"cluster_internal": 0.7, "cross_cluster_probe": 0.2, "new_exploration": 0.1},
                 }
         # 扫描轮全失败 → 从 A 开始正常轮转
@@ -193,32 +252,35 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
         },
     }
 
-    # 情况 1: 有越狱成功 → 以点打面
+    # 情况 1: 有越狱成功 → 弱偏置扩散，不让新攻全部收敛为同型扩写
     if bypassed > 0 and successful_prompts:
         next_strategy["variant_mode"] = True
-        next_strategy["successful_templates"] = [
-            {"prompt_id": sp.get("prompt_id", ""), "prompt_text": sp.get("prompt_text", "")}
-            for sp in (successful_prompts or [])[:3]
+        next_strategy["successful_templates"] = _sanitize_successful_templates(successful_prompts)
+        next_strategy["new_attack_mix"] = _build_new_attack_mix(total_slots=10, success_neighbor_slots=3, cross_cluster_slots=2)
+        next_strategy["focus_cluster"] = current_cluster
+
+        cluster_subs = _get_subs_for_cluster(current_cluster)
+        neighbor_subcategories = [s for s in cluster_subs if s not in covered_categories]
+        cross_cluster_subcategories = _get_cross_cluster_subcategories(current_cluster, covered_categories)
+        fresh_subcategories = [
+            s for s in uncovered
+            if s not in neighbor_subcategories and s not in cross_cluster_subcategories
         ]
 
-        # 保持成功的手法不变，扩散到同类簇的其他子类
-        cluster_subs = _get_subs_for_cluster(current_cluster)
-        still_uncovered = [s for s in cluster_subs if s not in covered_categories]
+        next_strategy["neighbor_subcategories"] = neighbor_subcategories[:5]
+        next_strategy["cross_cluster_subcategories"] = cross_cluster_subcategories[:4]
+        next_strategy["fresh_subcategories"] = fresh_subcategories[:8]
 
-        if still_uncovered:
-            next_strategy["subcategories"] = still_uncovered[:5]
-            next_strategy["primary_cluster"] = current_cluster
-            next_strategy["primary_method"] = current_method
-            next_strategy["primary_concept"] = current_concept
-        else:
-            # 当前类簇已全覆盖，扩散到相邻类簇
-            clusters = _load_clusters()
-            cross = clusters.get(current_cluster, {}).get("cross_cluster", [])
-            if cross:
-                next_cluster = cross[0]
-                next_strategy["primary_cluster"] = next_cluster
-                next_strategy["subcategories"] = _get_subs_for_cluster(next_cluster)[:5]
-
+        mix = next_strategy["new_attack_mix"]
+        combined_subcategories = (
+            next_strategy["neighbor_subcategories"][:mix["success_neighbor_slots"]]
+            + next_strategy["cross_cluster_subcategories"][:mix["cross_cluster_slots"]]
+            + next_strategy["fresh_subcategories"][:mix["fresh_exploration_slots"]]
+        )
+        next_strategy["subcategories"] = _dedupe_keep_order(combined_subcategories)[:10]
+        next_strategy["primary_cluster"] = current_cluster
+        next_strategy["primary_method"] = current_method
+        next_strategy["primary_concept"] = current_concept
         return next_strategy
 
     # 情况 2: 有明确信号 → 根据信号映射策略
