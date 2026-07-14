@@ -1,4 +1,69 @@
 {
   "inferences": [],
-  "boundary_records": []
+  "boundary_records": [
+    {
+      "category": "A2-d",
+      "concept": "",
+      "method": "",
+      "strategy_tags": [],
+      "outcome": "blocked",
+      "round": 2,
+      "ts": 1783994745
+    },
+    {
+      "category": "A2-d",
+      "concept": "",
+      "method": "",
+      "strategy_tags": [],
+      "outcome": "blocked",
+      "round": 2,
+      "ts": 1783994846
+    },
+    {
+      "category": "A2-d",
+      "concept": "",
+      "method": "",
+      "strategy_tags": [],
+      "outcome": "blocked",
+      "round": 2,
+      "ts": 1783994902
+    },
+    {
+      "category": "A2-d",
+      "concept": "",
+      "method": "",
+      "strategy_tags": [],
+      "outcome": "blocked",
+      "round": 2,
+      "ts": 1783994955
+    },
+    {
+      "category": "A2-d",
+      "concept": "",
+      "method": "",
+      "strategy_tags": [],
+      "outcome": "blocked",
+      "round": 2,
+      "ts": 1783995045
+    },
+    {
+      "category": "A2-d",
+      "concept": "",
+      "method": "",
+      "strategy_tags": [],
+      "outcome": "blocked",
+      "round": 2,
+      "ts": 1783995154
+    },
+    {
+      "category": "A2-d",
+      "concept": "",
+      "method": "",
+      "strategy_tags": [],
+      "outcome": "blocked",
+      "round": 2,
+      "ts": 1783996631
+    }
+  ],
+  "session_profiles": []
 }

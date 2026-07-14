@@ -45,7 +45,7 @@ config/agent_home/.claude.json
 !config/agent_home/.claude/skills/prompt-skill/evals/evals.json
 
 # 其他 config 运行时文件（含密钥）
-config/claude_agent_settings.json
+config/generator_settings.json
 config/claude_home/
 
 # 调试截图

@@ -2,7 +2,7 @@
 
 import pytest
 
-from engine import claude_agent
+from engine import prompt_generator
 from engine.orchestrator import RedTeamOrchestrator
 
 
@@ -22,17 +22,17 @@ def test_generate_parallel_keeps_continuations_when_new_generation_fails(monkeyp
                 "session_id": "S-1-p01",
                 "prompt_id": "cont-S-1-p01",
                 "prompt_text": "这是续攻提示词，应该继续保留原会话上下文执行。",
-                "target_category": "A-1",
+                "target_category": "A2-d",
             }
         ]
 
-    monkeypatch.setattr(claude_agent, "generate_prompts", fail_new)
-    monkeypatch.setattr(claude_agent, "generate_continuations", ok_continuations)
+    monkeypatch.setattr(prompt_generator, "generate_prompts", fail_new)
+    monkeypatch.setattr(prompt_generator, "generate_continuations", ok_continuations)
 
-    new_prompts, cont_prompts = claude_agent.generate_parallel(
+    new_prompts, cont_prompts = prompt_generator.generate_parallel(
         round_num=5,
-        strategy={"subcategories": ["A-1"]},
-        active_sessions=[{"session_id": "S-1-p01", "messages": [], "target_category": "A-1"}],
+        strategy={"subcategories": ["A2-d"]},
+        active_sessions=[{"session_id": "S-1-p01", "messages": [], "target_category": "A2-d"}],
     )
 
     assert new_prompts == []
@@ -48,14 +48,14 @@ def test_generate_parallel_raises_when_new_and_continuation_both_fail(monkeypatc
     def fail_continuations(**kwargs):
         raise RuntimeError("续攻输出非JSON")
 
-    monkeypatch.setattr(claude_agent, "generate_prompts", fail_new)
-    monkeypatch.setattr(claude_agent, "generate_continuations", fail_continuations)
+    monkeypatch.setattr(prompt_generator, "generate_prompts", fail_new)
+    monkeypatch.setattr(prompt_generator, "generate_continuations", fail_continuations)
 
     with pytest.raises(RuntimeError, match="提示词生成完全失败"):
-        claude_agent.generate_parallel(
+        prompt_generator.generate_parallel(
             round_num=5,
-            strategy={"subcategories": ["A-1"]},
-            active_sessions=[{"session_id": "S-1-p01", "messages": [], "target_category": "A-1"}],
+            strategy={"subcategories": ["A2-d"]},
+            active_sessions=[{"session_id": "S-1-p01", "messages": [], "target_category": "A2-d"}],
         )
 
 
@@ -83,7 +83,7 @@ def test_orchestrator_skips_single_empty_generation_round_then_recovers(monkeypa
             {
                 "prompt_id": "p01",
                 "prompt_text": "第二轮恢复后的新攻提示词。",
-                "target_category": "A-1",
+                "target_category": "A2-d",
             }
         ], []
 
@@ -95,7 +95,7 @@ def test_orchestrator_skips_single_empty_generation_round_then_recovers(monkeypa
                 "response_text": "我可以配合完成这个请求。",
                 "status": "bypassed",
                 "type": p.get("type", "new"),
-                "target_category": p.get("target_category", "A-1"),
+                "target_category": p.get("target_category", "A2-d"),
                 "latency_ms": 1,
             }
             for p in all_prompts

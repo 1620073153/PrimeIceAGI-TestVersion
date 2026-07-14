@@ -3,7 +3,6 @@
 import time
 import threading
 from data.kb_store import load_kb, save_kb, kb_meta, load_kb5, delete_kb5_inference, kb5_exists, delete_kb5_file
-from data.tc260_standards import CATEGORIES
 from data.bypass_knowledge import BYPASS_CONCEPTS, BYPASS_METHODS
 from engine.target_client import PRESET_TEMPLATES
 from backend.schemas import validate_kb_entry, ValidationError
@@ -50,24 +49,24 @@ def delete_kb5() -> dict:
 
 
 def get_standards() -> dict:
+    from data.kb_store import load_kb
+    kb1 = load_kb("kb1")
+    categories = kb1.get("categories", {})
+    total = sum(len(v.get("subcategories", {})) for v in categories.values())
     return {
         "categories": {
-            k: {
-                "name": v["name"],
-                "priority": v["priority"],
-                "subcategories": v["subcategories"],
-                "sub_count": len(v["subcategories"]),
-            }
-            for k, v in CATEGORIES.items()
+            k: {"name": v["name"], "priority": v.get("priority", "P1"),
+                "subcategories": v.get("subcategories", {}), "sub_count": len(v.get("subcategories", {}))}
+            for k, v in categories.items()
         },
-        "total_subcategories": 31,
+        "total_subcategories": total,
     }
 
 
 def get_concepts() -> dict:
     return {
         "concepts": {
-            k: {"name": v["name"], "layer": v["layer"], "principle": v["principle"]}
+            k: {"layer": v.get("layer", ""), "principle": v.get("principle", "")}
             for k, v in BYPASS_CONCEPTS.items()
         },
         "total": len(BYPASS_CONCEPTS),
@@ -77,7 +76,7 @@ def get_concepts() -> dict:
 def get_methods() -> dict:
     return {
         "methods": {
-            k: {"name": v["name"], "category": v["category"], "description": v["description"]}
+            k: {"category": v.get("category", ""), "description": v.get("description", "")}
             for k, v in BYPASS_METHODS.items()
         },
         "total": len(BYPASS_METHODS),
@@ -116,10 +115,23 @@ def create_entry(kb_id: str, new_entry: dict) -> None:
             data["categories"][key] = {k: v for k, v in new_entry.items() if k != "key"}
         elif kb_id == "kb4":
             templates = data.get("templates", {})
-            entry_id = new_entry.get("entry_id", "") or f"tpl_{len(templates) + 1:03d}"
+            entry_id = new_entry.get("entry_id", "").strip() or new_entry.get("key", "").strip()
+            if not entry_id:
+                # 自动递增 ID: t01, t02, ...
+                existing_nums = []
+                for k in templates.keys():
+                    if k.startswith("t") and k[1:].isdigit():
+                        existing_nums.append(int(k[1:]))
+                next_num = max(existing_nums, default=0) + 1
+                entry_id = f"t{next_num:02d}"
             new_entry.setdefault("created_at", time.time())
             new_entry.setdefault("updated_at", time.time())
-            templates[entry_id] = {k: v for k, v in new_entry.items() if k != "entry_id"}
+            # 只保留 template_text + 时间戳
+            templates[entry_id] = {
+                "template_text": new_entry.get("template_text", ""),
+                "created_at": new_entry.get("created_at"),
+                "updated_at": new_entry.get("updated_at"),
+            }
             data["templates"] = templates
         else:
             key = new_entry["key"]
@@ -147,9 +159,12 @@ def update_entry(kb_id: str, entry_key: str, updates: dict) -> None:
             container = data.get("methods", {})
         if entry_key not in container:
             raise ValidationError(f"条目 {entry_key} 不存在")
-        container[entry_key].update({k: v for k, v in updates.items() if k not in ("key", "entry_id")})
         if kb_id == "kb4":
+            # KB4 简化：只更新 template_text
+            container[entry_key]["template_text"] = updates.get("template_text", container[entry_key].get("template_text", ""))
             container[entry_key]["updated_at"] = time.time()
+        else:
+            container[entry_key].update({k: v for k, v in updates.items() if k not in ("key", "entry_id")})
         save_kb(kb_id, data)
 
 

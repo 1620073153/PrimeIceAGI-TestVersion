@@ -187,8 +187,8 @@ class TestKb5Consistency:
         }, ensure_ascii=False), encoding="utf-8")
 
         results = [
-            {"target_category": "A-1", "status": "blocked", "concept": "", "method": "", "strategy_tags": ["策略1"]},
-            {"target_category": "A-1", "status": "bypassed", "concept": "", "method": "", "strategy_tags": ["策略2"]},
+            {"target_category": "A2-d", "status": "blocked", "concept": "", "method": "", "strategy_tags": ["策略1"]},
+            {"target_category": "A2-d", "status": "bypassed", "concept": "", "method": "", "strategy_tags": ["策略2"]},
             {"target_category": "", "status": "blocked", "concept": "", "method": "", "strategy_tags": []},
         ]
 

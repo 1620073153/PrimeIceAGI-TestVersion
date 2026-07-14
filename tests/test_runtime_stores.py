@@ -8,21 +8,21 @@ from engine.runtime import (
 
 
 def test_round_context_snapshot_returns_serializable_copy():
-    strategy = {"primary_cluster": "B"}
+    strategy = {"primary_cluster": "A2"}
     ctx = RoundContext(current_round=3, strategy=strategy, token_budget_ratio=0.6)
 
     snapshot = ctx.snapshot()
 
     assert snapshot == {
         "current_round": 3,
-        "strategy": {"primary_cluster": "B"},
+        "strategy": {"primary_cluster": "A2"},
         "token_budget_ratio": 0.6,
     }
 
-    strategy["primary_cluster"] = "A"
-    snapshot["strategy"]["primary_cluster"] = "C"
+    strategy["primary_cluster"] = "A1"
+    snapshot["strategy"]["primary_cluster"] = "A3"
 
-    assert ctx.strategy == {"primary_cluster": "B"}
+    assert ctx.strategy == {"primary_cluster": "A2"}
 
 
 def test_session_store_seed_merge_and_snapshot_use_copy_semantics():
@@ -30,14 +30,14 @@ def test_session_store_seed_merge_and_snapshot_use_copy_semantics():
         "S-1": {
             "session_id": "S-1",
             "messages": ["hello"],
-            "meta": {"cluster": "B"},
+            "meta": {"cluster": "A2"},
         }
     }
     store = SessionStore.seed(seeded)
     assert isinstance(store, SessionStore)
 
     seeded["S-1"]["messages"].append("mutated")
-    seeded["S-1"]["meta"]["cluster"] = "A"
+    seeded["S-1"]["meta"]["cluster"] = "A1"
 
     store.upsert(
         "S-1",

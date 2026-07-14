@@ -157,8 +157,13 @@ class LLMClient:
                 raise last_error
 
             except requests.exceptions.ConnectionError as e:
-                # 连接错误不重试
+                # 连接重置/中断：暂时性错误，可重试
                 self._limiter.report_error()
+                last_error = e
+                if attempt < self.max_retries:
+                    import time
+                    time.sleep(2 * (attempt + 1))
+                    continue
                 raise
 
             except requests.exceptions.HTTPError:

@@ -49,13 +49,20 @@ var Sessions = {
           detail.className = 'session-detail';
           detail.id = 'sess-detail-' + s.session_id;
           var btnRow = document.createElement('div');
-          btnRow.style.cssText = 'display:flex;gap:8px;margin-bottom:10px';
+          btnRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px';
 
           var viewBtn = document.createElement('button');
           viewBtn.className = 'btn btn-ghost btn-xs';
           viewBtn.textContent = '查看完整报告';
           viewBtn.addEventListener('click', (function (sid) {
             return function () { Sessions.loadReport(sid); };
+          })(s.session_id));
+
+          var downloadBtn = document.createElement('button');
+          downloadBtn.className = 'btn btn-ghost btn-xs';
+          downloadBtn.textContent = '下载报告 (.md)';
+          downloadBtn.addEventListener('click', (function (sid) {
+            return function () { window.open('/api/sessions/' + sid + '/report', '_blank'); };
           })(s.session_id));
 
           var delBtn = document.createElement('button');
@@ -67,6 +74,16 @@ var Sessions = {
           })(s.session_id));
 
           btnRow.appendChild(viewBtn);
+          btnRow.appendChild(downloadBtn);
+
+          var docxBtn = document.createElement('button');
+          docxBtn.className = 'btn btn-ghost btn-xs';
+          docxBtn.textContent = '下载报告 (.docx)';
+          docxBtn.addEventListener('click', (function (sid) {
+            return function () { window.open('/api/sessions/' + sid + '/report-docx', '_blank'); };
+          })(s.session_id));
+          btnRow.appendChild(docxBtn);
+
           btnRow.appendChild(delBtn);
           detail.appendChild(btnRow);
 

@@ -5,6 +5,7 @@ from flask import Flask
 from backend.routes.batch_eval import batch_eval_bp
 from backend.routes.health import health_bp
 from backend.routes.kb import kb_bp
+from backend.routes.report import report_bp
 from backend.routes.sessions import sessions_bp
 from backend.routes.test import test_bp
 
@@ -16,3 +17,4 @@ def register_blueprints(app: Flask):
     app.register_blueprint(sessions_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(batch_eval_bp)
+    app.register_blueprint(report_bp)

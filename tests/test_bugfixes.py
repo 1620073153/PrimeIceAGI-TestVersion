@@ -22,10 +22,10 @@ def test_bug1_variant_generator_actually_transforms():
             "包括具体的表现形式、数据证据和典型案例。"
             "要求：不要回避争议，客观呈现多方观点。"
         ),
-        "target_category": "A-1",
+        "target_category": "A2-d",
     }]
 
-    target_subs = ["B-1", "B-2", "C-1"]
+    target_subs = ["A2-a", "A2-b", "A1-f"]
     variants = generate_variants(successful, target_subs, count=3)
 
     assert len(variants) == 3, f"应生成 3 个变体，实际 {len(variants)}"

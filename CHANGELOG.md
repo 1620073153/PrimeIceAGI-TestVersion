@@ -1,5 +1,375 @@
 # PrimeIceAGI 变更记录
 
+## v0.4.7-beta (2026-07-14) — TC260-003 标准迁移 + 全链路解耦
+
+### Breaking Changes
+
+- **KB1 标准替换**: 从 AI 近似分簇 (A-F, 6类) 切换为 TC260-003 原文标准 (A1-A5, 5大类31子类)
+- 所有 subcategory key 从 `"A-1"` 格式变为 `"A1-a"` 格式
+- `kb1.json` 中移除 `clusters` 段，仅保留 `standard` + `categories`
+- 旧格式 `kb1.json` 在首次启动时自动覆盖为新标准
+
+### Removed
+
+- **cross_cluster 邻域探索机制**: 完全移除，由 coverage-weighted 采样替代
+  - `engine/knowledge/cluster_index.py` — ClusterIndex 类废弃
+  - `strategy_arbitrator._get_cross_cluster_subcategories()` 删除
+  - `strategy_arbitrator._ensure_cross_cluster_filled()` 删除
+  - `strategy_arbitrator._build_new_attack_mix()` 删除（死代码）
+  - prompt_generator、exploration_balancer、candidate_selector 相关引用清除
+- `engine/claude_agent.py` — 已迁移至 prompt_generator
+- `engine/runtime/scoring_store.py` — 不再使用
+- `engine/system_prompt_inferrer.py` — 功能合并到 boundary_tracker
+
+### Added
+
+- **类别注释功能 (Category Filter)**
+  - 前端：测试参数 tab 新增 A1-A5 类别 toggle 树，支持全选/全关和单独禁用子类
+  - 后端：`disabled_categories` 参数透传至 orchestrator → strategy_arbitrator
+  - 报告分母动态调整，反映实际测试范围
+- **DOCX 政务报告** (`backend/services/report_docx_service.py`)
+  - 按信息中心模型评测标准格式生成 Word 文档
+  - 风险等级颜色标注 (P0→严重/红, P1→高/橙, P2→中/黄)
+  - 与 MD 报告同等脱敏级别（方法名+50字响应预览，不含原始提示词）
+  - 新路由 `GET /api/sessions/<id>/report-docx`
+  - 前端历史会话卡片新增"下载报告(.docx)"按钮
+- `data/tc260_standards.py` — TC260-003 种子数据模块，含工具函数
+- `engine/prompt_generator_adapter.py` — 提示词生成适配层
+- `engine/defense_fingerprinter.py` — 防御指纹识别模块
+- `engine/intel_aggregator.py` — 情报聚合模块
+
+### Changed
+
+- **全链路动态化**：所有 category/subcategory 引用改为运行时从 `kb1.json` 动态读取
+  - `_get_priority_order()` 从 categories keys 排序获取
+  - `DEFAULT_STRATEGY` → `_make_default_strategy()` 工厂函数
+  - `report_service.py` 的 map 改为动态加载
+  - `kb_service.get_standards()` 从 `load_kb("kb1")` 读取
+  - 前端 `/31` 硬编码改为从 API `total_subcategories` 动态获取
+- **生成容错恢复**: orchestrator 恢复 `generation_failure_limit` 容错逻辑
+- `new_attack_mix` 中 cross_cluster_slots 合并入 fresh_exploration_slots
+- `data/bypass_knowledge.py` SIGNAL_STRATEGY_MAP target_cluster 更新为 A1-A5
+- `start.bat` 简化为嵌入式 Python runtime 方案
+- `requirements.txt` 新增 `python-docx>=1.1`
+
+### Fixed
+
+- `_get_priority_order()` 删除 clusters 段后返回空列表导致调度锁死
+- `ensure_seed_files()` 不覆盖旧格式 kb1.json 导致升级静默失效
+- LLM 示例 `"target_category":"A-1"` 旧格式导致输出无法匹配标准
+- report_service 严重程度/类别名在新格式下全部降级为默认值
+- mock_server 残留旧格式 target_category 值
+- test_start_bat 断言与重写后的 start.bat 不匹配
+- test_test_service preflight validation 未 mock 导致失败
+
+---
+
+## 2026-07-13 — 覆盖率修复 + 报告生成功能
+
+### Fix #10: 情况1覆盖率修复（D/E/F从未触达）
+
+**文件**: `engine/strategy_arbitrator.py`
+**问题**: 情况1(有bypass)的 `fresh_subcategories[:n_fresh]` 按字典序截断，C簇5个子类排在D/E/F前面把名额吃完，导致5轮13并发只覆盖A/B/C+D-1（10/31=32%），E和F永远拿不到位置。
+**根因**: fresh列表来自按类目顺序遍历的 `uncovered`，用 `[:N]` 截取时C(5个)恰好填满6个slot中的5个，D只剩1个，E/F为0。
+
+**修复**:
+- 新增 `_coverage_weighted_sample()` 函数：按每个簇的未覆盖子类数量加权分配slot，每个有候选的簇保底1个，剩余按比例+随机采样，消除字典序偏向
+- 引入锚点自动推进：当前cluster未覆盖子类<=1时，`primary_cluster` 推进到未覆盖率最高的簇
+- neighbor列表 `random.shuffle` 避免顺序固化
+
+**效果**: 10次模拟验证，6簇100%覆盖，平均28.3/31子类（91%），对比修复前32%提升近3倍。
+
+### Fix #11: 预审发现的4个隐患
+
+**文件**: `engine/strategy_arbitrator.py`
+
+| 问题 | 修复 |
+|------|------|
+| 连续归零+KB2为空时concept_pool被覆盖为[]，random.choice崩溃 | `rotated_concepts[:5] or ["认知层次陷阱"]` 兜底 |
+| `_expand_subcategories` 修改传入的可变参数（副作用污染） | 函数开头加 `base_list = list(base_list)` 防御性拷贝 |
+| `_get_cross_cluster_subcategories` 自引用导致跨簇退化 | 过滤 `if cluster == current_cluster: continue` |
+| scan_mode全败后hardcode cluster="A" | 改为选未覆盖率最高的簇 |
+
+### 新功能: 测试报告生成（Markdown格式）
+
+**文件**: `backend/services/report_service.py`（新增）、`backend/routes/report.py`（新增）
+
+**API**: `GET /api/sessions/<session_id>/report` → 下载 .md 文件
+
+**报告内容**:
+- 执行摘要（轮次/成功/拒绝/覆盖率）
+- 覆盖分析（按A-F簇列表，标记已覆盖/未覆盖）
+- 各轮次统计表（总数/绕过/拒绝/部分/绕过率/主要信号）
+- 成功绕过样本（脱敏，最多10条）
+- 信号分布汇总（按出现频率排序）
+- 评估建议（基于覆盖率和绕过数自动生成）
+
+**前端**: 测试完成后在报告区显示"下载测试报告"按钮
+
+### 调用链审核结论
+
+| 验证点 | 状态 |
+|------|------|
+| 情况1返回字段覆盖 orchestrator 需求 | ✅ |
+| 情况1返回字段覆盖 prompt_generator 需求 | ✅ |
+| effective_cluster → primary_cluster 链路 | ✅ |
+| _coverage_weighted_sample 返回类型兼容 | ✅ |
+| _expand_subcategories 接口不变 | ✅ |
+| scan_mode fallthrough 动态选簇 | ✅ |
+
+---
+
+## 2026-07-13 — 9 项核心修复（测试 10:40 发现的问题）
+
+### 修复概述
+
+基于 5 轮实测暴露的 9 个系统性问题，完整修复链路缺陷。采用双 agent 独立实现 + 交叉审查 + 链路审核三阶段流程。
+
+### Fix #1: Judge confidence 门槛
+
+**文件**: `engine/orchestrator.py` L336-344
+**问题**: judge LLM 解析失败时 fallback 为 confidence=0.3 的"部分突破"，无条件覆盖 signal_extractor 正确的 bypassed 判定，导致绕过率被低估。
+**修复**: confidence < 0.5 时不覆盖 status，仅记录 judge_reason/judge_confidence 用于调试。
+
+### Fix #2: signal_strategy_map 加 50% 随机因子
+
+**文件**: `engine/strategy_arbitrator.py` L376-397
+**问题**: signal_strategy_map 确定性循环——同一信号类型永远推荐同一方向，策略从第 2 轮起锁死。
+**修复**: 50% 概率用 signal_map 推荐方向，50% 从 concept_pool/method_pool 随机选。
+
+### Fix #3: prompt 措辞软化
+
+**文件**: `engine/prompt_generator.py` L129-167
+**问题**: _format_strategy_library 强制 LLM "必须使用指定原理，不可替换"，concept_pool/method_pool 的 5×5 组合空间完全浪费。
+**修复**: 改为"优先使用/鼓励混合"，让 generator LLM 自由组合 pool 中多个概念+手法。
+
+### Fix #4: 续攻标签继承
+
+**文件**: `engine/orchestrator.py` L751-755
+**问题**: 续攻结果缺少 concept/method，标签 fallback 到当前轮 primary，无法归因"哪个策略最终成功"。
+**修复**: 从 self.active_sessions[sid] 取原始 concept/method 补充到续攻 result。
+
+### Fix #5: subcategories 去重
+
+**文件**: `engine/strategy_arbitrator.py` L83-124
+**问题**: base_list 不够填满 total_slots 时循环填充产生重复，浪费测试覆盖面。
+**修复**: 优先从全局子类中补充未覆盖的（排除 covered_categories），不足时再循环复用。新增空列表防护避免 ZeroDivisionError。
+
+### Fix #6: method_pool 同步
+
+**文件**: `engine/strategy_arbitrator.py` 情况2/3/4 各分支
+**问题**: _rotate_method 更新 primary_method 后 method_pool 未同步，pool 和 primary 矛盾导致 generator LLM 混乱。
+**修复**: 每次轮转后检查新 method 是否在 pool 中，不在则更新（新 method 首位 + 4 个旧的）。
+
+### Fix #7: KB5 前端回显
+
+**文件**: `static/js/kb.js` L140-155
+**问题**: renderEntries() 只渲染 inferences[]，session_profiles 和 boundary_records 完全不显示。
+**修复**: session_profiles 逐条展示（最多 5 条）；boundary_records 汇总为统计行（绕过N/阻断N/共N条）。
+
+### Fix #8: successful_templates 元信息补全
+
+**文件**: `engine/orchestrator.py` L462-468
+**问题**: 续攻成功的 template 记录中 concept/method 为空，丢失可复用策略情报。
+**修复**: all_successful_prompts.extend 前防御性补全——缺失时用当前策略 primary 填充。
+
+### Fix #9: max_tokens 2048→4096 + 截断检测
+
+**文件**: `engine/target_client.py` L33/L53/L115-135
+**问题**: 推理模型（如 DeepSeek R1）的 max_tokens 覆盖推理+响应总和，2048 不够导致响应被截断，且无任何提示。
+**修复**: 默认值翻倍至 4096；新增 _detect_truncation() 检测 OpenAI finish_reason="length" 和 Anthropic stop_reason="max_tokens"（含流式场景）；result["truncated"]=True 传递至前端。
+
+### 链路审核补充修复
+
+- `static/js/kb.js` L152: `.status` → `.outcome`（boundary_tracker 写入字段名不匹配，导致统计永远显示 0/0）
+- `engine/strategy_arbitrator.py` L117-118: cycle_pool 为空时提前返回（防御 KB1 完全为空的极端场景）
+
+### 审核结论
+
+| 维度 | 结果 |
+|------|------|
+| 数据流完整性 | ✅ 无断裂 |
+| 边界条件 | ✅ 已防护 |
+| 统计一致性 | ✅ stats 正确反映最终 status |
+| 并发安全 | ✅ GIL 保护读操作 |
+| KB5 写入 | ✅ 字段名已修正 |
+| 前端兼容 | ✅ 空数据防御性处理 |
+
+**遗留**: 前端未渲染 truncated 标记（数据已传递，仅显示层缺失，不影响核心流程）
+
+---
+
+## 2026-07-13 — 移除 concept_method_map，解耦 KB2/KB3
+
+### 变更 11: 移除概念→手法硬绑定
+
+**动机**：concept_method_map 将 KB2 概念绑定到 KB3 手法子集，导致：
+- 用户新增概念/手法需额外维护映射关系
+- 全失败时调度只在绑定的 2-3 个手法里打转，探索空间受限
+- 与原始设计（让 generator LLM 自由组合 concept_pool + method_pool）冲突
+
+**改动**：
+- `engine/strategy_arbitrator.py`: 删除 `_load_concept_method_map()` / `_get_methods_for_concept()`；情况3简化为单轮失败→全局轮转method，连续2轮归零→三换(concept+method+cluster)
+- `data/bypass_knowledge.py`: 删除 `CONCEPT_METHOD_MAP` 常量
+- `data/kb_store.py`: 移除 CONCEPT_METHOD_MAP import 和默认数据注入
+- `kb_data/kb3.json` / `kb_data/kb3_methods.json`: 删除 concept_method_map 字段
+- `tests/test_kb_index.py`: 删除 fixture 中的引用
+
+**效果**：
+- KB2/KB3 完全解耦，用户添加新概念/手法后即插即用，无需配置映射
+- 全失败时手法从全局 17+ 种中轮转，探索多样性提升
+- concept_pool(5) + method_pool(5) 机制不变，每轮随机抽取交给 LLM 自由组合
+
+**验证**：审核 agent 确认 4 种调度路径（有bypass/信号驱动/全失败/首轮扫描）均正常；129 通过 / 11 失败（预存）
+
+---
+
+## 2026-07-13 — 第二批变更落地 + 一致性修复
+
+### 已完成项（第二批计划 4-7 + 补充修复）
+
+4. **KB2/KB3 去英文 key** ✓
+   - `kb_data/kb2.json`, `kb_data/kb2_concepts.json`: 所有 key 改为中文概念名（12 个）
+   - `kb_data/kb3.json`, `kb_data/kb3_methods.json`: 所有 key 改为中文手法名
+   - `engine/strategy_arbitrator.py`: fallback 值改为中文（"认知层次陷阱"/"学术讨论包装"）
+   - `engine/prompt_generator.py`: `_known_concepts`/`_known_methods` 改为动态 `set(load_kb(...).keys())`
+   - `static/js/kb.js`: KB2/KB3 表单移除英文"名称"字段
+   - 测试文件（6 个）: 中文 key 适配
+
+5. **KB4 前端编辑简化** ✓
+   - `static/js/kb.js`: 表单只保留 ID + template_text
+   - `backend/services/kb_service.py`: 自动生成 ID (t01, t02...)
+
+6. **KB5 defense_profile 持久化** ✓
+   - `data/kb_store.py`: 新增 `save_kb5_session_profile()` / `load_kb5_latest_profile()`
+   - `engine/orchestrator.py`: session 结束时写入，启动时热加载
+
+7. **续攻历史显示** ✓
+   - `engine/orchestrator.py`: 续攻调用前快照 conversation_history
+   - `static/js/app.js`: renderDetailItem 渲染折叠式对话历史
+
+### 补充修复（一致性审核后）
+
+8. **kb2.json 概念同步**
+   - kb2.json 从 9 个概念补齐到 12 个，与 kb3.json concept_method_map 对齐
+   - 补入：逻辑炸弹与状态机推演、逻辑分割与动态同构编码、Chat Template 模板注入
+
+9. **claude_agent 全面清理**
+   - `engine/adapters/claude_agent_adapter.py` 删除（功能已在 prompt_generator_adapter.py）
+   - 测试文件 `as claude_agent` 别名 → 直接用 `prompt_generator`
+   - 4 个测试 monkeypatch 路径: `engine.orchestrator.claude_agent` → `engine.orchestrator.prompt_generator`
+   - `tests/test_new_attack_balance.py` import 改为 prompt_generator_adapter
+
+10. **配置命名统一**
+    - `_claude_agent_settings` → `_generator_settings`（orchestrator.py）
+    - `claude_agent_settings.json` → `generator_settings.json`（prompt_generator.py + .gitignore）
+
+### 测试状态
+
+- 129 通过 / 11 失败（预存问题，与本次改动无关）
+- 11 个失败原因：
+  - test_start_bat.py (6): 期望旧版 start.bat 内容（:missing_claude 标签等）
+  - test_prompt_generation_resilience.py (2): KB4 首轮直发逻辑与 monkeypatch 冲突
+  - test_test_service.py (1): 配置验证缺 URL/Key/Model
+  - test_api_routes.py (2): generator config 端点测试函数名残留
+
+---
+
+## 2026-07-10 — 计划变更 22（预告，用于回滚参照）
+
+### 第一批：核心流程优化
+
+1. **KB4 首轮直发**
+   - KB4 结构简化为 `{id, template_text}`，去掉 name/category/tags/hit_rate_hint
+   - orchestrator 首轮逻辑：模板直发目标模型，不经 generator LLM
+   - 数量匹配：模板优先占 slot，不足由 generator 补满，超出则随机截取并发数
+   - 后续轮次不再引用 KB4
+   - 涉及文件：`engine/orchestrator.py`, `engine/prompt_generator.py`, `kb_data/kb4.json`, `kb_data/kb4_injection_templates.json`
+
+2. **轮次头部标签修复**
+   - 只统计新攻(promptType=new)的 top concept/method
+   - 多个并列时显示"多向探索"
+   - 发送统计改为 `发送 N (新攻X+续攻Y)` 格式
+   - 涉及文件：`static/js/app.js` renderRoundCard
+
+3. **续攻补位修正**
+   - 新攻 slots 应为 total_slots - actual_cont_count（动态），而非固定值
+   - 涉及文件：`engine/orchestrator.py`
+
+### 第二批：KB 重构 + 体验优化（待第一批验证后实施）
+
+4. **KB2/KB3 去英文 key，改为中文名称作字典主键**
+   - 消除所有英文 slug → 中文 name 的映射层
+   - `_known_methods`/`_known_concepts` 硬编码白名单改为动态 `set(load_kb("kb3").get("methods",{}).keys())`
+   - 前端 toCn() 映射函数简化（key 本身就是中文，不再需要翻译）
+   - strategy_arbitrator 的 concept_pool/method_pool 内容变为中文 key
+   - 涉及文件：`kb_data/kb2.json`, `kb_data/kb2_concepts.json`, `kb_data/kb3.json`, `kb_data/kb3_methods.json`, `engine/prompt_generator.py`, `engine/strategy_arbitrator.py`, `static/js/app.js`
+   - 注意：改动范围大，需同步更新 signal_strategy_map 中的引用
+
+5. **KB4 前端编辑简化**
+   - 编辑页面只需 ID + template_text 文本框
+   - 后端 save 时自动补全 created_at/updated_at
+   - kb4.json 结构改为 `{templates: {"t01": {"template_text": "..."}, ...}}`
+   - 涉及文件：`static/js/kb.js`, `templates/index.html`, `backend/services/kb_service.py`
+
+6. **KB5 defense_profile 持久化**
+   - session 结束时将内存中的 `_defense_profile` 和 `kb5_summary` 写入 kb5.json 的 `session_profiles` 数组
+   - 下次 session 启动时读取最近一次 profile 做热启动
+   - 涉及文件：`engine/orchestrator.py`, `data/kb_store.py`
+
+7. **续攻历史显示**
+   - 后端：在 `_call_target_batch` 的 `call_one` 内，续攻调用前快照 `sess["messages"]` 到 `result["conversation_history"]`
+   - 后端：`detailedResults` 构建时将 `conversation_history` 传出（仅 promptType=continue 时）
+   - 前端：`renderDetailItem` 对续攻类型渲染折叠式对话历史（提示词1→响应1→...→当前轮）
+   - 涉及文件：`engine/orchestrator.py`, `static/js/app.js`
+
+### 第一批复核备注
+
+- `engine/knowledge/kb_index.py` + `template_index.py`：死代码（无运行时引用），保留不影响
+- KB4 直发的 target_category="KB4模板" 不在有效 cluster 中：第二轮策略由 signal 信号驱动（情况2），不依赖 target_category，可接受
+- `prompt_generator.py` 删除 dead import `random`（已完成）
+
+---
+
+## 2026-07-10 — 策略轮转 + 续攻补位 + 标注修复 + 前端中文化
+
+### 修复 21: 策略仲裁器 primary 锁死 + 标注丢失 + 续攻补位不足
+
+**问题根因**:
+
+1. `strategy_arbitrator.py` 情况1：只要 bypassed > 0 就锁死 primary_concept/primary_method 不变，
+   导致 5 轮前端全部显示同一策略方向（如"反事实诱导框架/翻译嵌套"），即使实际 prompt 内容已多样化
+2. `prompt_generator.py`：生成的 prompt 不携带 concept/method 字段，orchestrator fallback 到
+   primary 统一标注，每条 prompt 在 UI 上看起来一模一样
+3. `prompt_generator.py`：续攻补位时 batch_size=1，但最低解析阈值硬编码为 3，补位必失败
+
+**改动内容**:
+
+1. `engine/strategy_arbitrator.py` — 情况1分支（第 364-372 行）:
+   - 新增绕过率计算：bypass_rate = bypassed / total
+   - bypass_rate >= 40% 时保留当前 primary（策略有效，继续深挖）
+   - bypass_rate < 40% 时从 pool 轮转 primary（策略效果不佳，换方向展示）
+
+2. `engine/prompt_generator.py` — `generate_prompts()` 后处理（第 355-410 行）:
+   - 新增 `_known_methods` / `_known_concepts` 关键词集
+   - 每条 prompt 从 strategy_tags 匹配 method/concept，匹配不到则按 pool index 轮转
+   - 确保每条 prompt 携带独立的 concept/method 字段
+
+3. `engine/prompt_generator.py` — 最低解析阈值（第 344 行）:
+   - `min_required = min(3, batch_size)` 替代硬编码 3
+   - 补位 batch_size=1 时只需解析到 1 条即可
+
+4. `engine/orchestrator.py` — 续攻补位逻辑（第 621-642 行）:
+   - generate_parallel 后检查 shortfall = expected - actual
+   - shortfall > 0 时追加调用 generate_prompts 补位，非致命
+
+5. `static/js/app.js` — 前端标签中文化:
+   - Error → 异常、Response → 响应、Reasoning → 推理、Prompt → 提示词
+
+**预期效果**: 轮次头部策略方向不再锁死，每条 prompt 标注各异，续攻不足时自动补满 total_slots
+
+---
+
 ## 2026-07-10 — Judge 解析鲁棒性修复 + 信号提取器误判修正
 
 ### 修复 20: Judge 解析失败导致 partial 虚高

@@ -9,6 +9,7 @@ var App = {
   elapsedTimer: null,
   elapsedStart: 0,
   trackCount: 0,
+  totalSubcategories: 31,
   THEME_KEY: 'primeiceagi-theme',
   maxRounds: function () { return parseInt(document.getElementById('max_rounds').value) || 5; }
 };
@@ -23,15 +24,17 @@ function loadNameMaps() {
         Object.keys(subs).forEach(function(sk){ NameMap.categories[sk] = subs[sk]; });
       });
     }
+    var payload = d.data || d;
+    if (payload.total_subcategories) App.totalSubcategories = payload.total_subcategories;
   }).catch(function(){});
   fetch('/api/knowledge/concepts').then(function(r){return r.json()}).then(function(d){
     if (d.ok && d.data && d.data.concepts) {
-      Object.keys(d.data.concepts).forEach(function(k){ NameMap.concepts[k] = d.data.concepts[k].name || k; });
+      Object.keys(d.data.concepts).forEach(function(k){ NameMap.concepts[k] = k; });
     }
   }).catch(function(){});
   fetch('/api/knowledge/methods').then(function(r){return r.json()}).then(function(d){
     if (d.ok && d.data && d.data.methods) {
-      Object.keys(d.data.methods).forEach(function(k){ NameMap.methods[k] = d.data.methods[k].name || k; });
+      Object.keys(d.data.methods).forEach(function(k){ NameMap.methods[k] = k; });
     }
   }).catch(function(){});
 }
@@ -478,6 +481,10 @@ function testFireScript(statusEl) {
 
 function startTest() {
   var config = buildConfig();
+  var disabledCats = CategoryFilter.getDisabled();
+  if (disabledCats.length > 0) {
+    config.disabled_categories = disabledCats;
+  }
   if (config.compiled_script) {
     // 脚本模式不需要 target_api_url/key
   } else if (!config.target_api_url || (!config.target_api_key && config.template_name !== 'custom')) {
@@ -524,6 +531,8 @@ function stopTest() {
 function finalize() {
   document.getElementById('btn-start').disabled = false;
   document.getElementById('btn-stop').style.display = 'none';
+  // 保存 taskId 用于弹窗下载（finalize 后 App.taskId 会置空）
+  var finishedTaskId = App.taskId;
   App.taskId = null;
   if (App.eventSource) { App.eventSource.close(); App.eventSource = null; }
   if (App.elapsedTimer) { clearInterval(App.elapsedTimer); App.elapsedTimer = null; }
@@ -531,8 +540,45 @@ function finalize() {
   if (typeof KB !== 'undefined' && KB.refreshKb5State) {
     KB.refreshKb5State();
   }
+  // 弹出报告下载弹窗
+  if (finishedTaskId) {
+    showReportModal(finishedTaskId);
+  }
 }
 function resetUI() { document.getElementById('btn-start').disabled = false; document.getElementById('btn-stop').style.display = 'none'; }
+
+/* ── 报告下载弹窗 ── */
+function showReportModal(sessionId) {
+  var modal = document.getElementById('report-download-modal');
+  if (!modal) return;
+  // 填充统计数据
+  var totalRounds = App.allRounds.length;
+  var totalBypassed = 0;
+  var coveredSet = new Set();
+  App.allRounds.forEach(function (r) {
+    var s = r.summary || {};
+    totalBypassed += s.bypassed || 0;
+    (r.detailedResults || []).forEach(function (d) {
+      if (d.jailbreakStatus === 'bypassed' && d.category) coveredSet.add(d.category);
+    });
+  });
+  document.getElementById('modal-stat-rounds').textContent = totalRounds;
+  document.getElementById('modal-stat-bypassed').textContent = totalBypassed;
+  document.getElementById('modal-stat-coverage').textContent = coveredSet.size + '/' + App.totalSubcategories;
+  // 存储 sessionId 供下载按钮使用
+  modal.dataset.sessionId = sessionId;
+  modal.classList.add('active');
+}
+
+function closeReportModal() {
+  var modal = document.getElementById('report-download-modal');
+  if (modal) modal.classList.remove('active');
+}
+
+function downloadReport(sessionId) {
+  if (sessionId) window.open('/api/sessions/' + sessionId + '/report', '_blank');
+  closeReportModal();
+}
 
 function restoreLastTask() {
   var lastId = sessionStorage.getItem('lastTaskId');
@@ -579,7 +625,30 @@ function renderRoundCard(e) {
   var ct = document.getElementById('rounds-container');
   var c = document.createElement('div'); c.className = 'round-card';
 
-  var headerHtml = '<div class="round-header"><span class="round-title">R' + e.round + ' <span style="color:var(--accent)">' + escHtml(toCn('concepts', ns.primaryConcept)) + '</span> / <span style="color:var(--purple)">' + escHtml(toCn('methods', ns.primaryMethod)) + '</span></span><span class="round-stats"><span>发送 <span class="round-stat-val">' + (s.total || 0) + '</span></span><span class="stat-success">绕过 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-partial">部分 <span class="round-stat-val">' + (s.partial || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span><span>' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
+  // 只统计新攻的 concept/method
+  var newDs = ds.filter(function(d) { return d.promptType !== 'continue'; });
+  var contCount = ds.length - newDs.length;
+  var conceptCounts = {}, methodCounts = {};
+  newDs.forEach(function(d) {
+    if (d.concept) conceptCounts[d.concept] = (conceptCounts[d.concept] || 0) + 1;
+    if (d.method) methodCounts[d.method] = (methodCounts[d.method] || 0) + 1;
+  });
+  var conceptKeys = Object.keys(conceptCounts).sort(function(a,b){ return conceptCounts[b]-conceptCounts[a]; });
+  var methodKeys = Object.keys(methodCounts).sort(function(a,b){ return methodCounts[b]-methodCounts[a]; });
+  var topConcept = conceptKeys[0] || ns.primaryConcept || '';
+  var topMethod = methodKeys[0] || ns.primaryMethod || '';
+  // 并列检测：top1 和 top2 出现次数相同则视为多向探索
+  var conceptLabel = (conceptKeys.length > 1 && conceptCounts[conceptKeys[0]] === conceptCounts[conceptKeys[1]]) ? '多向探索' : toCn('concepts', topConcept);
+  var methodLabel = toCn('methods', topMethod);
+  var conceptCount = conceptKeys.length;
+  var methodCount = methodKeys.length;
+  var diversityHint = (conceptCount > 1 || methodCount > 1) ? ' <span style="font-size:11px;color:var(--text-secondary)">(' + conceptCount + '概念/' + methodCount + '方法)</span>' : '';
+
+  var totalNum = s.total || 0;
+  var newNum = s.newPrompts || (totalNum - contCount);
+  var sendLabel = '发送 <span class="round-stat-val">' + totalNum + '</span>' + (contCount > 0 ? ' <span style="font-size:11px;color:var(--text-secondary)">(新攻' + newNum + '+续攻' + contCount + ')</span>' : '');
+
+  var headerHtml = '<div class="round-header"><span class="round-title">R' + e.round + ' <span style="color:var(--accent)">' + escHtml(conceptLabel) + '</span> / <span style="color:var(--purple)">' + escHtml(methodLabel) + '</span>' + diversityHint + '</span><span class="round-stats"><span>' + sendLabel + '</span><span class="stat-success">绕过 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-partial">部分 <span class="round-stat-val">' + (s.partial || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span><span>' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
 
   var judgeWarnCount = ds.filter(function(d) { return d.judge_reason && (d.judge_reason.indexOf('解析失败') !== -1 || d.judge_reason.indexOf('调用异常') !== -1 || d.judge_reason.indexOf('无法判断') !== -1); }).length;
   var judgeTotal = ds.filter(function(d) { return !!d.judge_reason; }).length;
@@ -603,10 +672,10 @@ function renderDetailItem(d) {
   var sm = { bypassed: { cls: 'bypassed', text: '绕过', badge: 'badge-bypass' }, blocked: { cls: 'blocked', text: '拒绝', badge: 'badge-block' }, partial: { cls: 'partial', text: '部分', badge: 'badge-partial' }, guardrail_blocked: { cls: 'blocked', text: '护栏', badge: 'badge-guardrail' }, error: { cls: 'blocked', text: '错误', badge: 'badge-error' } };
   var info = sm[d.jailbreakStatus] || sm['partial'];
   var typeTag = d.promptType === 'continue' ? '<span class="badge badge-continue">续攻·' + escHtml(d.sessionId || '') + '</span>' : '';
-  var errorLine = d.error ? '<div class="result-text" style="margin-top:6px;color:#e74c3c"><span class="label-text">Error</span><br>' + escHtml(d.error) + '</div>' : '';
-  var responseLine = d.modelResponse ? '<div class="result-text" style="margin-top:6px"><span class="label-text">Response</span><br>' + escLong(d.modelResponse, 400) + '</div>' : '';
-  var reasoningLine = d.reasoningText ? '<div class="result-text" style="margin-top:6px;opacity:0.7"><span class="label-text">Reasoning</span><br>' + escLong(d.reasoningText, 300) + '</div>' : '';
-  if (!d.modelResponse && !d.reasoningText) { responseLine = '<div class="result-text" style="margin-top:6px;color:var(--text-muted)"><span class="label-text">Response</span><br>[无响应内容]</div>'; }
+  var errorLine = d.error ? '<div class="result-text" style="margin-top:6px;color:#e74c3c"><span class="label-text">异常</span><br>' + escHtml(d.error) + '</div>' : '';
+  var responseLine = d.modelResponse ? '<div class="result-text" style="margin-top:6px"><span class="label-text">响应</span><br>' + escLong(d.modelResponse, 400) + '</div>' : '';
+  var reasoningLine = d.reasoningText ? '<div class="result-text" style="margin-top:6px;opacity:0.7"><span class="label-text">推理</span><br>' + escLong(d.reasoningText, 300) + '</div>' : '';
+  if (!d.modelResponse && !d.reasoningText) { responseLine = '<div class="result-text" style="margin-top:6px;color:var(--text-muted)"><span class="label-text">响应</span><br>[无响应内容]</div>'; }
   var judgeBadge = '';
   if (d.judge_reason) {
     var jrText = d.judge_reason;
@@ -615,7 +684,27 @@ function renderDetailItem(d) {
     var jStyle = isWarn ? 'background:var(--warning-dim);color:var(--warning)' : 'background:var(--purple-dim);color:var(--purple)';
     judgeBadge = '<span class="badge" style="' + jStyle + '" title="' + escHtml(jrText) + '">裁判: ' + escHtml(jrText.length > 12 ? jrText.substring(0, 12) + '…' : jrText) + jConf + '</span>';
   }
-  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(toCn('concepts', d.concept)) + '</span><span class="badge badge-method">' + escHtml(toCn('methods', d.method)) + '</span>' + (d.category ? '<span style="color:var(--text-secondary);font-size:11px">' + escHtml(toCn('categories', d.category)) + '</span>' : '') + '<span>' + (d.latencyMs || 0) + 'ms</span>' + judgeBadge + '</div><div class="result-text"><span class="label-text">Prompt</span><br>' + escLong(d.promptText || '', 300) + '</div>' + responseLine + reasoningLine + errorLine + '</div>';
+  // 续攻对话历史折叠渲染
+  var historyHtml = '';
+  if (d.promptType === 'continue' && d.conversationHistory && d.conversationHistory.length > 0) {
+    var history = d.conversationHistory;
+    var totalMsgs = history.length;
+    var displayMsgs = history;
+    var omittedHint = '';
+    if (totalMsgs > 6) {
+      displayMsgs = history.slice(totalMsgs - 6);
+      omittedHint = '<div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;font-style:italic">...更早 ' + (totalMsgs - 6) + ' 条已省略</div>';
+    }
+    var histId = 'hist-' + Math.random().toFixed(8).slice(2);
+    var msgsHtml = omittedHint + displayMsgs.map(function(m) {
+      var roleLabel = m.role === 'user' ? '提示词' : '响应';
+      var roleColor = m.role === 'user' ? 'var(--accent)' : 'var(--success)';
+      var roleIcon = m.role === 'user' ? '&#9654;' : '&#9664;';
+      return '<div style="margin:3px 0;padding:4px 8px;border-left:3px solid ' + roleColor + ';background:var(--bg-tertiary);border-radius:2px;font-size:12px"><span style="color:' + roleColor + ';font-weight:600;font-size:11px">' + roleIcon + ' ' + roleLabel + '</span><div style="margin-top:2px;white-space:pre-wrap;word-break:break-all">' + escHtml(m.content.length > 300 ? m.content.substring(0, 300) + '...' : m.content) + '</div></div>';
+    }).join('');
+    historyHtml = '<div class="result-text" style="margin-top:6px;margin-bottom:6px"><button class="btn btn-xs btn-ghost" onclick="var el=document.getElementById(\'' + histId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\';this.textContent=el.style.display===\'none\'?\'对话历史 (' + totalMsgs + '条) &#9654;\':\'对话历史 (' + totalMsgs + '条) &#9660;\'">对话历史 (' + totalMsgs + '条) &#9654;</button><div id="' + histId + '" style="display:none;margin-top:4px;padding:6px;border:1px solid var(--border-primary);border-radius:4px;background:var(--bg-secondary)">' + msgsHtml + '</div></div>';
+  }
+  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(toCn('concepts', d.concept)) + '</span><span class="badge badge-method">' + escHtml(toCn('methods', d.method)) + '</span>' + (d.category ? '<span style="color:var(--text-secondary);font-size:11px">' + escHtml(toCn('categories', d.category)) + '</span>' : '') + '<span>' + (d.latencyMs || 0) + 'ms</span>' + judgeBadge + '</div>' + historyHtml + '<div class="result-text"><span class="label-text">提示词</span><br>' + escLong(d.promptText || '', 300) + '</div>' + responseLine + reasoningLine + errorLine + '</div>';
 }
 
 function updateFinalSummary() {
@@ -626,16 +715,116 @@ function updateFinalSummary() {
   var cv = new Set();
   App.allRounds.forEach(function (r) { (r.detailedResults || []).forEach(function (d) { if (d.jailbreakStatus === 'bypassed' && d.category) cv.add(d.category); }); });
   document.getElementById('sum-success').textContent = ts;
-  document.getElementById('sum-coverage').textContent = cv.size + '/31';
+  document.getElementById('sum-coverage').textContent = cv.size + '/' + App.totalSubcategories;
   document.getElementById('sum-peak').textContent = br.toFixed(0) + '%';
   var mx = Math.max.apply(null, rates.concat([1]));
   document.getElementById('chart-bypass').innerHTML = rates.map(function (r, i) { return '<div class="bar-col"><div class="bar-fill" style="height:' + (r / mx * 100).toFixed(0) + '%"></div><div class="bar-label">R' + (i + 1) + '</div></div>'; }).join('');
   document.getElementById('chart-covered').innerHTML = cv.size > 0 ? '<div class="kb-list">' + Array.from(cv).sort().map(function (c) { return '<span class="kb-tag">' + escHtml(toCn('categories', c)) + '</span>'; }).join('') + '</div>' : '暂无';
 }
 
+// === 类别筛选模块 ===
+var CategoryFilter = {
+  disabled: [],
+
+  init: function() {
+    fetch('/api/knowledge/standards')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var payload = d.data || d;
+        var cats = payload.categories || {};
+        CategoryFilter.render(cats);
+      });
+    var toggleBtn = document.getElementById('btn-cat-toggle-all');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', CategoryFilter.toggleAll);
+    }
+  },
+
+  render: function(cats) {
+    var ct = document.getElementById('category-tree');
+    if (!ct) return;
+    ct.innerHTML = '';
+    var keys = Object.keys(cats).sort();
+    keys.forEach(function(k) {
+      var cat = cats[k];
+      var div = document.createElement('div');
+      div.style.cssText = 'margin-bottom:6px';
+
+      // 大类 checkbox
+      var lbl = document.createElement('label');
+      lbl.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:500';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      cb.dataset.catKey = k;
+      cb.addEventListener('change', function() { CategoryFilter.toggleCategory(k, this.checked); });
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(k + ' — ' + cat.name));
+      div.appendChild(lbl);
+
+      // 子类区域
+      var subs = cat.subcategories || {};
+      var subDiv = document.createElement('div');
+      subDiv.style.cssText = 'margin-left:24px;color:var(--text-secondary)';
+      subDiv.id = 'cat-subs-' + k;
+      Object.keys(subs).forEach(function(sk) {
+        var sl = document.createElement('label');
+        sl.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-right:12px;cursor:pointer';
+        var scb = document.createElement('input');
+        scb.type = 'checkbox';
+        scb.checked = true;
+        scb.dataset.subKey = sk;
+        scb.addEventListener('change', function() { CategoryFilter.updateDisabled(); });
+        sl.appendChild(scb);
+        sl.appendChild(document.createTextNode(sk));
+        subDiv.appendChild(sl);
+      });
+      div.appendChild(subDiv);
+      ct.appendChild(div);
+    });
+  },
+
+  toggleCategory: function(catKey, checked) {
+    var subDiv = document.getElementById('cat-subs-' + catKey);
+    if (subDiv) {
+      var cbs = subDiv.querySelectorAll('input[type="checkbox"]');
+      for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked;
+    }
+    CategoryFilter.updateDisabled();
+  },
+
+  toggleAll: function() {
+    var tree = document.getElementById('category-tree');
+    if (!tree) return;
+    var allCbs = tree.querySelectorAll('input[type="checkbox"]');
+    var allChecked = true;
+    for (var i = 0; i < allCbs.length; i++) {
+      if (!allCbs[i].checked) { allChecked = false; break; }
+    }
+    for (var i = 0; i < allCbs.length; i++) allCbs[i].checked = !allChecked;
+    CategoryFilter.updateDisabled();
+  },
+
+  updateDisabled: function() {
+    var tree = document.getElementById('category-tree');
+    if (!tree) return;
+    var disabled = [];
+    var subs = tree.querySelectorAll('input[data-sub-key]');
+    for (var i = 0; i < subs.length; i++) {
+      if (!subs[i].checked) disabled.push(subs[i].dataset.subKey);
+    }
+    CategoryFilter.disabled = disabled;
+  },
+
+  getDisabled: function() {
+    return CategoryFilter.disabled;
+  }
+};
+
 /* ── Init ── */
 document.addEventListener('DOMContentLoaded', function () {
   loadNameMaps();
+  CategoryFilter.init();
   applyTheme(getTheme());
   document.querySelectorAll('.nav-tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -675,6 +864,19 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('btn-sync-aux').addEventListener('click', syncToAux);
   loadGeneratorCfg();
   if (document.getElementById('kb-add-btn')) document.getElementById('kb-add-btn').addEventListener('click', function () { if (typeof KB !== 'undefined') KB.addEntry(); });
+  // 报告下载弹窗按钮事件
+  document.getElementById('report-modal-download').addEventListener('click', function () {
+    var modal = document.getElementById('report-download-modal');
+    var sid = modal ? modal.dataset.sessionId : null;
+    downloadReport(sid);
+  });
+  document.getElementById('report-modal-download-docx').addEventListener('click', function () {
+    var modal = document.getElementById('report-download-modal');
+    var sid = modal ? modal.dataset.sessionId : null;
+    if (sid) window.open('/api/sessions/' + sid + '/report-docx', '_blank');
+    closeReportModal();
+  });
+  document.getElementById('report-modal-dismiss').addEventListener('click', closeReportModal);
   restoreLastTask();
   // Hash 路由：支持 /#kb /#sessions /#test 定位到对应 tab
   var hashMap = { '#kb': 'nav-kb', '#sessions': 'nav-sessions', '#test': 'nav-test' };

@@ -3,7 +3,7 @@
 将越狱成功的提示词模板适配到同类簇的其他子类
 """
 
-from data.tc260_standards import CATEGORIES, CLUSTERS
+from data.tc260_standards import CATEGORIES
 
 
 def generate_variants(successful_prompts: list[dict],
@@ -17,7 +17,7 @@ def generate_variants(successful_prompts: list[dict],
 
     输入:
     - successful_prompts: 本轮越狱成功的提示词 [{"prompt_id":"", "prompt_text":"", ...}, ...]
-    - target_subcategories: 目标子类编号列表 ["A-2", "B-1", ...]
+    - target_subcategories: 目标子类编号列表 ["A1-a", "A2-b", ...]
     - count: 需要生成的变体数量 (默认10)
 
     输出:

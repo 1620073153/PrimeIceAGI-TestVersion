@@ -14,20 +14,19 @@ import time
 
 from pathlib import Path
 
-from data.tc260_standards import CATEGORIES, CLUSTERS
-from data.bypass_knowledge import BYPASS_CONCEPTS, BYPASS_METHODS, SIGNAL_STRATEGY_MAP, CONCEPT_METHOD_MAP
+from data.tc260_standards import CATEGORIES, CLUSTERS, STANDARD_META
+from data.bypass_knowledge import BYPASS_CONCEPTS, BYPASS_METHODS, SIGNAL_STRATEGY_MAP
 
 
 _KB_DEFAULTS = {
-    "kb1": lambda: {"categories": CATEGORIES, "clusters": CLUSTERS},
+    "kb1": lambda: {"standard": STANDARD_META, "categories": CATEGORIES},
     "kb2": lambda: {"concepts": BYPASS_CONCEPTS},
     "kb3": lambda: {
         "methods": BYPASS_METHODS,
         "signal_strategy_map": SIGNAL_STRATEGY_MAP,
-        "concept_method_map": CONCEPT_METHOD_MAP,
     },
     "kb4": lambda: {"templates": {}},
-    "kb5": lambda: {"inferences": []},
+    "kb5": lambda: {"inferences": [], "boundary_records": [], "session_profiles": []},
 }
 
 _KB_LEGACY_FILENAMES = {
@@ -98,19 +97,38 @@ def _migrate_legacy_file(kb_id: str) -> bool:
     return True
 
 
+def _is_old_format_kb1(filepath: str) -> bool:
+    """检测 kb1.json 是否为旧格式（单字母 A/B/C/D/E/F key）"""
+    try:
+        data = _load_json_file(filepath)
+        cats = data.get("categories", {})
+        if not cats:
+            return False
+        first_key = next(iter(cats))
+        return len(first_key) == 1 and first_key.isalpha()
+    except Exception:
+        return False
+
+
 def ensure_seed_files():
     """
     首次启动时，从 Python 硬编码数据生成所有 5 个权威 JSON 文件。
     如果旧命名文件存在且新文件不存在，先迁移旧文件。
-    如果权威文件已存在，不覆盖。
+    如果权威文件已存在，不覆盖（除非 KB1 为旧格式则强制更新）。
     """
     data_dir = get_data_dir()
 
     for kb_id, get_default in _KB_DEFAULTS.items():
         if _migrate_legacy_file(kb_id):
+            if kb_id == "kb1":
+                filepath = os.path.join(data_dir, _canonical_filename(kb_id))
+                if _is_old_format_kb1(filepath):
+                    _atomic_write(filepath, get_default())
             continue
         filepath = os.path.join(data_dir, _canonical_filename(kb_id))
         if not os.path.exists(filepath):
+            _atomic_write(filepath, get_default())
+        elif kb_id == "kb1" and _is_old_format_kb1(filepath):
             _atomic_write(filepath, get_default())
 
 
@@ -221,6 +239,45 @@ def save_kb5_boundary_records(records: list[dict]) -> bool:
     except Exception as e:
         print(f"[kb_store] save_kb5_boundary_records failed: {e}")
         return False
+
+
+def save_kb5_session_profile(session_id: str, defense_profile: list[dict], kb5_summary: str) -> bool:
+    """
+    将 session 的防御画像持久化到 KB5 的 session_profiles 数组。
+    FIFO 保留最近 5 条。
+    """
+    try:
+        data = load_kb5()
+        profiles = data.get("session_profiles", [])
+        profiles.append({
+            "session_id": session_id,
+            "timestamp": time.time(),
+            "defense_profile": defense_profile,
+            "kb5_summary": kb5_summary,
+        })
+        if len(profiles) > 5:
+            profiles = profiles[-5:]
+        data["session_profiles"] = profiles
+        _atomic_write(_kb_path("kb5"), data)
+        return True
+    except Exception as e:
+        print(f"[kb_store] save_kb5_session_profile failed: {e}")
+        return False
+
+
+def load_kb5_latest_profile() -> dict | None:
+    """
+    读取 kb5.json 中最近一次 session_profile。
+    返回 {session_id, timestamp, defense_profile, kb5_summary} 或 None。
+    """
+    try:
+        data = load_kb5()
+        profiles = data.get("session_profiles", [])
+        if profiles:
+            return profiles[-1]
+    except Exception:
+        pass
+    return None
 
 
 def delete_kb5_inference(inference_id: str) -> bool:

@@ -31,4 +31,4 @@ def test_app_js_surfaces_project_local_claude_status():
     assert "var status = data.status || {};" in script
     assert "st.textContent = status.message || '';" in script
     assert "st.style.color = status.ready ? 'var(--success)' : 'var(--warning)';" in script
-    assert "setTimeout(function () { loadClaudeCfg(); }, 100);" in script
+    assert "setTimeout(function () { loadGeneratorCfg(); }, 100);" in script

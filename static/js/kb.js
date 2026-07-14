@@ -137,13 +137,38 @@ var KB = {
         var inf = infs[i];
         es.push({ key: inf.inference_id || ('r' + inf.round), name: '第' + (inf.round || '?') + '轮边界推测', desc: (inf.summary || inf.model_identity || '').substring(0, 120) });
       }
+      // Fix #7: 渲染 session_profiles（最多5条）
+      var profiles = data.session_profiles || [];
+      for (var pi = 0; pi < Math.min(profiles.length, 5); pi++) {
+        var prof = profiles[pi];
+        var profKey = 'profile-' + (prof.session_id || pi);
+        es.push({ key: profKey, name: '画像: ' + (prof.session_id || '?'), desc: (prof.kb5_summary || '').substring(0, 120) });
+      }
+      // Fix #7: 渲染 boundary_records 汇总统计行
+      var records = data.boundary_records || [];
+      if (records.length > 0) {
+        var bypCount = 0, blkCount = 0;
+        for (var ri = 0; ri < records.length; ri++) {
+          if (records[ri].outcome === 'bypassed') bypCount++;
+          else blkCount++;
+        }
+        es.push({ key: 'boundary-summary', name: '边界记录汇总', desc: '绕过' + bypCount + '/阻断' + blkCount + '/共' + records.length + '条' });
+      }
+    } else if (KB.currentId === 'kb4') {
+      var tpls = data.templates || {};
+      for (var k in tpls) {
+        if (!tpls.hasOwnProperty(k)) continue;
+        var v = tpls[k];
+        var preview = (v.template_text || '').substring(0, 50);
+        es.push({ key: k, name: k, desc: preview });
+      }
     } else {
-      var m = KB.currentId === 'kb2' ? 'concepts' : (KB.currentId === 'kb3' ? 'methods' : 'templates');
+      var m = KB.currentId === 'kb2' ? 'concepts' : 'methods';
       var items = data[m] || {};
       for (var k in items) {
         if (!items.hasOwnProperty(k)) continue;
         var v = items[k];
-        es.push({ key: k, name: v.name || k, desc: (v.description || v.category || v.template_text || '').substring(0, 80) });
+        es.push({ key: k, name: k, desc: (v.description || v.category || '').substring(0, 80) });
       }
     }
 
@@ -260,25 +285,20 @@ var KB = {
       h += '<div class="form-group"><label>难度 (1-5)</label><input id="mf-difficulty" type="number" min="1" max="5" value="' + escHtml(data.difficulty || '1') + '"></div>';
       h += '<div class="form-group"><label>子类 (JSON)</label><textarea id="mf-subcategories" style="min-height:80px">' + escHtml(JSON.stringify(data.subcategories || {}, null, 2)) + '</textarea></div>';
     } else if (KB.currentId === 'kb2') {
-      h += '<div class="form-group"><label>概念 key</label><input id="mf-key" value="' + escHtml(editKey || '') + '" placeholder="my_concept" ' + (editKey ? 'readonly' : '') + '></div>';
-      h += '<div class="form-group"><label>名称</label><input id="mf-name" value="' + escHtml(data.name || '') + '" placeholder="概念名称"></div>';
+      h += '<div class="form-group"><label>概念名称 (key)</label><input id="mf-key" value="' + escHtml(editKey || '') + '" placeholder="如 认知层次陷阱" ' + (editKey ? 'readonly' : '') + '></div>';
       h += '<div class="form-group"><label>层级</label><input id="mf-layer" value="' + escHtml(data.layer || '') + '" placeholder="语义层/编码层/认知层/结构层/元层"></div>';
       h += '<div class="form-group"><label>原理</label><textarea id="mf-principle" style="min-height:60px">' + escHtml(data.principle || '') + '</textarea></div>';
       h += '<div class="form-group"><label>成功率预估</label><input id="mf-success_rate_hint" value="' + escHtml(data.success_rate_hint || '') + '" placeholder="如 中高 (60-75%)"></div>';
       h += '<div class="form-group"><label>提示词模板</label><textarea id="mf-prompt_template" style="min-height:60px">' + escHtml(data.prompt_template || '') + '</textarea></div>';
     } else if (KB.currentId === 'kb3') {
-      h += '<div class="form-group"><label>方法 key</label><input id="mf-key" value="' + escHtml(editKey || '') + '" placeholder="my_method" ' + (editKey ? 'readonly' : '') + '></div>';
-      h += '<div class="form-group"><label>名称</label><input id="mf-name" value="' + escHtml(data.name || '') + '" placeholder="方法名称"></div>';
+      h += '<div class="form-group"><label>方法名称 (key)</label><input id="mf-key" value="' + escHtml(editKey || '') + '" placeholder="如 角色扮演" ' + (editKey ? 'readonly' : '') + '></div>';
       h += '<div class="form-group"><label>分类</label><input id="mf-category" value="' + escHtml(data.category || '') + '" placeholder="如 身份伪装"></div>';
       h += '<div class="form-group"><label>描述</label><input id="mf-description" value="' + escHtml(data.description || '') + '"></div>';
       h += '<div class="form-group"><label>模板</label><textarea id="mf-template" style="min-height:60px">' + escHtml(data.template || '') + '</textarea></div>';
     } else if (KB.currentId === 'kb4') {
-      h += '<div class="form-group"><label>条目 ID</label><input id="mf-key" value="' + escHtml(editKey || '') + '" placeholder="tpl_001" ' + (editKey ? 'readonly' : '') + '></div>';
-      h += '<div class="form-group"><label>名称</label><input id="mf-name" value="' + escHtml(data.name || '') + '" placeholder="模板名称"></div>';
-      h += '<div class="form-group"><label>分类</label><input id="mf-category" value="' + escHtml(data.category || '') + '" placeholder="如 系统指令注入"></div>';
-      h += '<div class="form-group"><label>模板内容</label><textarea id="mf-template_text" style="min-height:100px">' + escHtml(data.template_text || '') + '</textarea></div>';
-      h += '<div class="form-group"><label>成功率预估</label><input id="mf-hit_rate_hint" value="' + escHtml(data.hit_rate_hint || '') + '" placeholder="如 75%"></div>';
-      h += '<div class="form-group"><label>标签 (逗号分隔)</label><input id="mf-tags" value="' + escHtml((data.tags || []).join(', ')) + '"></div>';
+      h += '<div class="form-group"><label>条目 ID</label><input id="mf-key" value="' + escHtml(editKey || '') + '" placeholder="自动生成 (t01, t02...)" ' + (editKey ? 'readonly' : '') + '><span class="hint">留空则自动递增</span></div>';
+      h += '<div class="form-group"><label>模板内容</label><textarea id="mf-template_text" style="min-height:200px">' + escHtml(data.template_text || '') + '</textarea></div>';
+      h += '<div class="form-group"><label>批量添加</label><textarea id="mf-batch" style="min-height:80px" placeholder="多条模板用 ===== 分隔，批量添加时忽略上方内容"></textarea><span class="hint">可选：粘贴多条模板，用 ===== 分隔</span></div>';
     }
 
     document.getElementById('kb-modal-fields').innerHTML = h;
@@ -287,6 +307,31 @@ var KB = {
     document.getElementById('kb-modal-save').onclick = function () {
       var f = KB.collectFields();
       if (!f) { toast('请填写必填字段', 'error'); return; }
+
+      // KB4 批量添加模式
+      if (KB.currentId === 'kb4' && f.batch_text) {
+        var items = f.batch_text.split('=====').map(function (s) { return s.trim(); }).filter(Boolean);
+        if (items.length === 0) { toast('批量内容为空', 'error'); return; }
+        var promises = items.map(function (text) {
+          return fetch('/api/kb/kb4/entries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_text: text })
+          });
+        });
+        Promise.all(promises).then(function (results) {
+          var ok = results.filter(function (r) { return r.ok; }).length;
+          toast('批量添加 ' + ok + '/' + items.length + ' 条', ok === items.length ? 'success' : 'error');
+          KB.closeModal(); KB.loadData();
+        });
+        return;
+      }
+
+      // KB4 单条：如果没有 template_text 也没有 batch_text 则报错
+      if (KB.currentId === 'kb4' && !f.template_text && !f.batch_text) {
+        toast('请填写模板内容', 'error'); return;
+      }
+
       var result = cb(f);
       if (result && result.then) {
         result.then(function (ok) {
@@ -300,7 +345,11 @@ var KB = {
   collectFields: function () {
     var f = {};
     var ke = document.getElementById('mf-key');
-    if (ke) { f.key = ke.value.trim(); if (!f.key) return null; }
+    if (ke) {
+      f.key = ke.value.trim();
+      // KB4 允许 key 为空（服务端自动生成）
+      if (!f.key && KB.currentId !== 'kb4') return null;
+    }
     var gv = function (id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; };
 
     if (KB.currentId === 'kb1') {
@@ -312,7 +361,6 @@ var KB = {
       f.difficulty = parseInt(gv('mf-difficulty')) || 1;
       try { f.subcategories = JSON.parse(gv('mf-subcategories') || '{}'); } catch (e) { f.subcategories = {}; }
     } else if (KB.currentId === 'kb2') {
-      f.name = gv('mf-name') || '未命名';
       f.layer = gv('mf-layer');
       f.principle = gv('mf-principle');
       f.success_rate_hint = gv('mf-success_rate_hint');
@@ -320,17 +368,13 @@ var KB = {
       f.applicable_models = [];
       f.description = '';
     } else if (KB.currentId === 'kb3') {
-      f.name = gv('mf-name') || '未命名';
       f.category = gv('mf-category');
       f.description = gv('mf-description');
       f.template = gv('mf-template');
     } else if (KB.currentId === 'kb4') {
       f.entry_id = gv('mf-key');
-      f.name = gv('mf-name') || '未命名';
-      f.category = gv('mf-category');
       f.template_text = gv('mf-template_text');
-      f.hit_rate_hint = gv('mf-hit_rate_hint');
-      f.tags = gv('mf-tags').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      f.batch_text = gv('mf-batch');
     }
     return f;
   },

@@ -77,7 +77,7 @@ class TestClaudeAgentConfig:
             str(tmp_path / "nonexistent.json")
         )
         monkeypatch.setattr(
-            "backend.routes.health.get_project_local_claude_status",
+            "backend.routes.health.get_generator_status",
             lambda: {
                 "cli_available": True,
                 "settings_exists": False,
@@ -96,7 +96,7 @@ class TestClaudeAgentConfig:
 
     def test_get_claude_agent_config_includes_status_summary(self, client, monkeypatch):
         monkeypatch.setattr(
-            "backend.routes.health.get_project_local_claude_status",
+            "backend.routes.health.get_generator_status",
             lambda: {
                 "cli_available": True,
                 "settings_exists": False,
@@ -120,7 +120,7 @@ class TestClaudeAgentConfig:
         broken_settings.write_text("{broken json", encoding="utf-8")
         monkeypatch.setattr("backend.routes.health.AGENT_SETTINGS_PATH", str(broken_settings))
         monkeypatch.setattr(
-            "backend.routes.health.get_project_local_claude_status",
+            "backend.routes.health.get_generator_status",
             lambda: {
                 "cli_available": True,
                 "settings_exists": True,
@@ -149,7 +149,7 @@ class TestClaudeAgentConfig:
 class TestStartValidation:
     def test_start_test_returns_400_when_project_local_claude_not_ready(self, client, monkeypatch):
         monkeypatch.setattr(
-            "backend.services.test_service.validate_claude_ready_for_start",
+            "backend.services.test_service.validate_generator_ready",
             lambda config: {"ok": False, "message": "项目内 Claude 尚未配置，请先在前端填写并保存 URL / Key / Model。"},
         )
 

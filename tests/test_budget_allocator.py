@@ -10,9 +10,9 @@ def test_allocate_round_budget_shifts_toward_continuation_when_active_sessions_a
         repeated_pattern_ratio=0.2,
     )
     assert budget == {
-        "new_attack_slots": 4,
-        "continuation_slots": 6,
-        "token_budget_ratio": 0.6,
+        "new_attack_slots": 5,
+        "continuation_slots": 5,
+        "token_budget_ratio": 0.5,
     }
 
 

@@ -12,17 +12,17 @@ def test_add_session_tracks_metadata_for_scheduler():
             "prompt_id": "p02",
             "prompt_text": "prompt text",
             "response_text": "response text",
-            "target_category": "B-2",
-            "concept": "role_play",
-            "method": "chain_of_thought_masking",
+            "target_category": "A2-b",
+            "concept": "角色扮演",
+            "method": "思维链伪装",
         },
         "new",
     )
 
     sess = next(iter(orch.active_sessions.values()))
-    assert sess["cluster"] == "B"
-    assert sess["concept"] == "role_play"
-    assert sess["method"] == "chain_of_thought_masking"
+    assert sess["cluster"] == "A2"
+    assert sess["concept"] == "角色扮演"
+    assert sess["method"] == "思维链伪装"
     assert sess["continuation_count"] == 0
     assert sess["success_score"] == 1.0
     assert sess["last_success_round"] == 2
@@ -36,15 +36,15 @@ def test_generate_all_prompts_only_sends_selected_sessions(monkeypatch):
         event_callback=events.append,
     )
     orch.current_round = 3
-    orch.strategy = {"variant_mode": False, "subcategories": ["A-1"]}
+    orch.strategy = {"variant_mode": False, "subcategories": ["A2-d"]}
     orch.kb5_summary = "intel"
     orch.active_sessions = {
         "S1": {
             "session_id": "S1",
             "messages": [],
             "turn_num": 1,
-            "target_category": "A-1",
-            "cluster": "A",
+            "target_category": "A2-d",
+            "cluster": "A2",
             "created_round": 1,
             "last_success_round": 2,
             "continuation_count": 1,
@@ -54,8 +54,8 @@ def test_generate_all_prompts_only_sends_selected_sessions(monkeypatch):
             "session_id": "N1",
             "messages": [],
             "turn_num": 1,
-            "target_category": "B-1",
-            "cluster": "B",
+            "target_category": "A2-a",
+            "cluster": "A2",
             "created_round": 2,
             "last_success_round": 2,
             "continuation_count": 0,
@@ -80,19 +80,19 @@ def test_generate_all_prompts_only_sends_selected_sessions(monkeypatch):
     def fake_generate_parallel(**kwargs):
         captured["active_sessions"] = kwargs.get("active_sessions")
         return (
-            [{"prompt_id": "p01", "prompt_text": "new prompt", "target_category": "A-1"}],
+            [{"prompt_id": "p01", "prompt_text": "new prompt", "target_category": "A2-d"}],
             [
                 {
                     "type": "continue",
                     "session_id": "N1",
                     "prompt_id": "cont-N1",
                     "prompt_text": "follow up prompt text long enough",
-                    "target_category": "B-1",
+                    "target_category": "A2-a",
                 }
             ],
         )
 
-    monkeypatch.setattr("engine.orchestrator.claude_agent.generate_parallel", fake_generate_parallel)
+    monkeypatch.setattr("engine.orchestrator.prompt_generator.generate_parallel", fake_generate_parallel)
 
     _, cont_prompts = orch._generate_all_prompts()
 

@@ -30,7 +30,7 @@ PRESET_TEMPLATES = {
             "model": "{{model}}",
             "messages": [{"role": "user", "content": "{{prompt}}"}],
             "temperature": 0.7,
-            "max_tokens": 2048,
+            "max_tokens": 4096,
         },
         "response_path": {
             "content": "choices.0.message.content",
@@ -50,7 +50,7 @@ PRESET_TEMPLATES = {
         },
         "body": {
             "model": "{{model}}",
-            "max_tokens": 2048,
+            "max_tokens": 4096,
             "messages": [{"role": "user", "content": "{{prompt}}"}],
         },
         "response_path": {
@@ -110,6 +110,30 @@ def _extract_anthropic_text(raw: dict) -> str:
         if isinstance(block, dict) and block.get("type") == "text":
             return block.get("text", "")
     return ""
+
+
+def _detect_truncation(raw: dict) -> bool:
+    """检测响应是否因 max_tokens 被截断。
+    - OpenAI格式：choices[0].finish_reason == "length"
+    - Anthropic格式（非流式）：stop_reason == "max_tokens"
+    - Anthropic格式（流式 message_delta）：delta.stop_reason == "max_tokens"
+    """
+    if not raw or not isinstance(raw, dict):
+        return False
+    # OpenAI 格式
+    choices = raw.get("choices")
+    if isinstance(choices, list) and choices:
+        finish_reason = choices[0].get("finish_reason", "")
+        if finish_reason == "length":
+            return True
+    # Anthropic 格式（非流式）
+    if raw.get("stop_reason") == "max_tokens":
+        return True
+    # Anthropic 格式（流式 message_delta 事件）
+    delta = raw.get("delta")
+    if isinstance(delta, dict) and delta.get("stop_reason") == "max_tokens":
+        return True
+    return False
 
 
 def _render_template(template: Any, variables: dict) -> Any:
@@ -302,6 +326,8 @@ class TargetClient:
                 result["raw_response"] = last_raw
                 if content or reasoning:
                     result["status"] = "success"
+                    # Fix #9: 截断检测
+                    result["truncated"] = _detect_truncation(last_raw)
                 else:
                     result["error"] = "SSE stream 无有效内容"
             else:
@@ -320,6 +346,8 @@ class TargetClient:
                     result["response_text"] = json.dumps(raw, ensure_ascii=False)[:2000]
 
                 result["status"] = "success"
+                # Fix #9: 截断检测
+                result["truncated"] = _detect_truncation(raw)
         except requests.exceptions.Timeout:
             result["error"] = f"请求超时 ({req['timeout']}s)"
             result["latency_ms"] = req["timeout"] * 1000
@@ -497,6 +525,8 @@ class TargetClient:
                 result["raw_response"] = last_raw
                 if content or reasoning:
                     result["status"] = "success"
+                    # Fix #9: 截断检测
+                    result["truncated"] = _detect_truncation(last_raw)
                 else:
                     result["error"] = "SSE stream 无有效内容"
             else:
@@ -515,6 +545,8 @@ class TargetClient:
                     result["response_text"] = json.dumps(raw, ensure_ascii=False)[:2000]
 
                 result["status"] = "success"
+                # Fix #9: 截断检测
+                result["truncated"] = _detect_truncation(raw)
         except requests.exceptions.Timeout:
             result["error"] = f"请求超时 ({req['timeout']}s)"
             result["latency_ms"] = req["timeout"] * 1000

@@ -40,6 +40,7 @@ def test_finished_test_schedules_event_bus_cleanup(monkeypatch):
     ImmediateTimer.scheduled_delays = []
 
     monkeypatch.setattr(test_service, "RedTeamOrchestrator", FakeOrchestrator)
+    monkeypatch.setattr(test_service, "validate_generator_ready", lambda config: {"ok": True})
     monkeypatch.setattr(test_service.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(test_service.threading, "Timer", ImmediateTimer)
     monkeypatch.setattr(test_service, "save_session", lambda *args, **kwargs: None)

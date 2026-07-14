@@ -40,4 +40,6 @@ def validate_kb_entry(kb_id: str, entry: dict) -> dict:
         raise ValidationError("无效的知识库 ID")
     if kb_id in ("kb1", "kb2", "kb3") and not entry.get("key"):
         raise ValidationError("缺少 key 字段")
+    if kb_id == "kb4" and not entry.get("template_text"):
+        raise ValidationError("缺少 template_text 字段")
     return entry

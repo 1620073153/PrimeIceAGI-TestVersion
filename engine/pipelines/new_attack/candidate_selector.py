@@ -9,6 +9,5 @@ def select_new_attack_candidates(*, strategy: dict, repeated_pattern_ratio: floa
     return {
         "mix": mix,
         "neighbor_candidates": list(strategy.get("neighbor_subcategories", []))[: mix["success_neighbor_slots"]],
-        "cross_cluster_candidates": list(strategy.get("cross_cluster_subcategories", []))[: mix["cross_cluster_slots"]],
         "fresh_candidates": list(strategy.get("fresh_subcategories", []))[: mix["fresh_exploration_slots"]],
     }
