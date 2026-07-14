@@ -1,4 +1,4 @@
-"""健康检查 + 连通性探测 + Claude智能体配置路由"""
+"""健康检查 + 连通性探测 + 提示词生成配置路由"""
 
 import json
 import os
@@ -6,7 +6,7 @@ import requests
 from flask import Blueprint, request, jsonify
 
 from engine.target_client import PRESET_TEMPLATES
-from engine.claude_agent import AGENT_HOME, get_project_local_claude_status
+from engine.prompt_generator import AGENT_HOME, get_generator_status
 
 health_bp = Blueprint("health", __name__)
 
@@ -47,7 +47,6 @@ def probe_target():
         if ep and not api_url.endswith(ep):
             api_url = api_url + ep
 
-    # 渲染变量
     for k, v in headers.items():
         headers[k] = str(v).replace("{{api_key}}", api_key)
     if isinstance(body, dict):
@@ -87,10 +86,11 @@ def probe_target():
         return jsonify({"reachable": False, "error": str(e)[:200]})
 
 
+@health_bp.route("/api/generator/config", methods=["GET"])
 @health_bp.route("/api/claude-agent/config", methods=["GET"])
-def get_claude_agent_config():
-    """读取 Claude 智能体配置"""
-    status = get_project_local_claude_status()
+def get_generator_config():
+    """读取提示词生成配置"""
+    status = get_generator_status()
     try:
         with open(AGENT_SETTINGS_PATH, "r", encoding="utf-8") as f:
             settings = json.load(f)
@@ -108,9 +108,10 @@ def get_claude_agent_config():
         return jsonify({"ok": True, "data": {"url": "", "key": "", "model": "", "status": status}})
 
 
+@health_bp.route("/api/generator/config", methods=["POST"])
 @health_bp.route("/api/claude-agent/config", methods=["POST"])
-def save_claude_agent_config():
-    """保存 Claude 智能体配置"""
+def save_generator_config():
+    """保存提示词生成配置"""
     data = request.get_json(force=True)
     url = data.get("url", "").strip()
     key = data.get("key", "").strip()

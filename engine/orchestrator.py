@@ -12,17 +12,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 from engine.target_client import TargetClient, PRESET_TEMPLATES
-from engine import claude_agent
+from engine import prompt_generator
 from engine.pipelines.new_attack import pipeline as new_attack_pipeline
 from engine.pipelines.continuation import pipeline as continuation_pipeline
-from engine.runtime import RoundContext, SessionStore, SessionCache, SuccessMemory, FailureMemory, ScoringStore
+from engine.runtime import RoundContext, SessionStore, SessionCache, SuccessMemory, FailureMemory
 from engine.scheduling.budget_allocator import allocate_round_budget
 from engine.signal_extractor import analyze_single_result, analyze_batch_results, is_guardrail_blocked
 from engine.response_judge import judge_batch
 from engine.llm_client import LLMClient
 from engine.strategy_arbitrator import decide_next_strategy, check_convergence, get_scan_strategy
-from engine.system_prompt_inferrer import infer_boundary_summary
-from engine.boundary_tracker import record_boundaries, build_matrix, format_boundary_intel
+from engine.boundary_tracker import record_boundaries
+from engine.defense_fingerprinter import fingerprint_batch
+from engine.intel_aggregator import aggregate_fingerprints, merge_with_history, format_defense_intel
 from engine.variant_generator import generate_variants
 from engine.continuation_scheduler import select_continuation_sessions
 from engine.summarizers.judge_input_compactor import compact_batch_for_judge
@@ -94,7 +95,7 @@ class RedTeamOrchestrator:
 
         # 状态
         self.current_round = 0
-        self.strategy = get_scan_strategy()
+        self.strategy = None  # 延迟到 _effective_concurrency 初始化后赋值
         self.covered_categories: list[str] = []
         self.stats_history: list[dict] = []
         self.all_rounds: list[dict] = []
@@ -122,6 +123,27 @@ class RedTeamOrchestrator:
         ) if config.get("agent_api_url") and config.get("agent_api_key") else None
         self._agent2_enabled = _parse_bool(config.get("agent2_enabled"), default=True)
 
+        # 生成层 LLM（与裁判共用 API 配置，独立限流）
+        self._generator_client = LLMClient(
+            api_url=config.get("agent_api_url", ""),
+            api_key=config.get("agent_api_key", ""),
+            model=config.get("generator_model", config.get("agent_model", "deepseek-chat")),
+            rate_limit=5.0,
+            timeout=120.0,
+            backoff_429=60.0,
+        ) if config.get("agent_api_url") and config.get("agent_api_key") else None
+
+        # 防御指纹分析 LLM（独立限流，短超时）
+        self._boundary_client = LLMClient(
+            api_url=config.get("agent_api_url", ""),
+            api_key=config.get("agent_api_key", ""),
+            model=config.get("agent_model", "deepseek-chat"),
+            rate_limit=10.0,
+            timeout=20.0,
+            backoff_429=60.0,
+        ) if config.get("agent_api_url") and config.get("agent_api_key") else None
+        self._defense_profile: list[dict] = []
+
         if config.get("covered_categories"):
             self.covered_categories = list(config["covered_categories"])
 
@@ -131,16 +153,25 @@ class RedTeamOrchestrator:
         self._continuation_fresh_ratio = float(config.get("continuation_fresh_ratio", 0.4))
         self._continuation_cluster_cap = float(config.get("continuation_cluster_cap", 0.4))
 
+        # 并发控制 — 单参数驱动
+        self._target_concurrency = int(config.get("target_concurrency", 10))
+        self._effective_concurrency = self._target_concurrency  # 可被 429 退让动态降低
+
+        # 生成层每个 worker 单次最多生成多少条（默认10，小模型可降到5-6）
+        self._generation_batch_size = int(config.get("generation_batch_size", 10))
+
+        # 首轮策略（依赖 _effective_concurrency）
+        self.strategy = get_scan_strategy(total_slots=self._effective_concurrency)
+
         self.session_store = SessionStore.seed(self.active_sessions)
         self.session_cache = SessionCache()
         self.success_memory = SuccessMemory.seed(self.all_successful_prompts)
         self.failure_memory = FailureMemory()
-        self.scoring_store = ScoringStore()
 
     def stop(self):
         """外部终止"""
         self._stopped = True
-        claude_agent.kill_active()
+        prompt_generator.kill_active()
 
     def _sync_runtime_from_legacy_state(self):
         self.session_store = SessionStore.seed(self.active_sessions)
@@ -148,8 +179,8 @@ class RedTeamOrchestrator:
 
     # ── 会话管理 ──
 
-    def _add_session(self, result: dict, prompt_type: str = "new"):
-        """将成功绕过的结果加入 active_sessions"""
+    def _add_session(self, result: dict, prompt_type: str = "new", session_goal: str = "deepen"):
+        """将绕过/部分成功的结果加入 active_sessions"""
         if prompt_type == "continue":
             sid = result.get("session_id", "")
             if sid in self.active_sessions:
@@ -160,10 +191,16 @@ class RedTeamOrchestrator:
                 sess["last_success_round"] = self.current_round
                 sess["continuation_count"] = int(sess.get("continuation_count", 0) or 0) + 1
                 sess["success_score"] = max(float(sess.get("success_score", 1.0)), 1.0)
+                sess["consecutive_failures"] = 0
+                # escalate 升级为 deepen（partial 续攻成功变为 bypass）
+                if sess.get("session_goal") == "escalate" and result.get("status") == "bypassed":
+                    sess["session_goal"] = "deepen"
+                    sess["success_score"] = 1.0
                 return
         else:
             sid = f"S-{self.current_round}-{result.get('prompt_id', 'x')}"
             category = result.get("target_category", "")
+            base_score = 1.0 if session_goal == "deepen" else 0.6
             self.active_sessions[sid] = {
                 "session_id": sid,
                 "messages": [
@@ -178,9 +215,9 @@ class RedTeamOrchestrator:
                 "created_round": self.current_round,
                 "last_success_round": self.current_round,
                 "continuation_count": 0,
-                "success_score": 1.0,
+                "success_score": base_score,
+                "session_goal": session_goal,
             }
-            # 脚本模式：注册 session 供续攻复用
             if hasattr(self.target_client, "register_session"):
                 self.target_client.register_session(sid, result)
 
@@ -209,10 +246,8 @@ class RedTeamOrchestrator:
         """运行多轮测试"""
         self._stopped = False
         max_rounds = int(self.config.get("max_rounds", 10))
-        cooldown_limit = int(self.config.get("cooldown_no_new", 2))
-        generation_failure_limit = int(self.config.get("generation_failure_limit", 2))
-        consecutive_generation_failures = 0
-        consecutive_zero = 0
+        self._session_fail_tolerance = int(self.config.get("cooldown_no_new", 2))
+        self._consecutive_zero_rounds = 0
         total_bypassed = 0
 
         while self.current_round < max_rounds and not self._stopped:
@@ -233,21 +268,13 @@ class RedTeamOrchestrator:
             new_prompts, cont_prompts = self._generate_all_prompts()
 
             if not new_prompts and not cont_prompts:
-                consecutive_generation_failures += 1
-                message = f"提示词生成失败，本轮跳过 ({consecutive_generation_failures}/{generation_failure_limit})"
+                stop_reason = "提示词生成完全失败，请检查生成层配置（API地址/密钥/模型名/余额）"
                 self.event_callback({
-                    "event": "generation_failed",
+                    "event": "stopped",
+                    "reason": stop_reason,
                     "round": self.current_round,
-                    "message": message,
-                    "consecutive_failures": consecutive_generation_failures,
                 })
-                if consecutive_generation_failures >= generation_failure_limit:
-                    stop_reason = f"连续 {generation_failure_limit} 轮提示词生成失败，提前终止"
-                    self.event_callback({"event": "stopped", "reason": stop_reason, "round": self.current_round})
-                    break
-                continue
-
-            consecutive_generation_failures = 0
+                break
 
             # 标记类型
             for p in new_prompts:
@@ -300,7 +327,7 @@ class RedTeamOrchestrator:
             if self._agent2_enabled and self._judge_client:
                 self.event_callback({"event": "judging", "round": self.current_round})
                 compacted_results = compact_batch_for_judge(analyzed_results)
-                judged = judge_batch(compacted_results, self._judge_client, max_workers=10)
+                judged = judge_batch(compacted_results, self._judge_client, max_workers=self._effective_concurrency)
                 judged_by_prompt_id = {item.get("prompt_id", ""): item for item in judged}
                 for result in analyzed_results:
                     judged_item = judged_by_prompt_id.get(result.get("prompt_id", ""))
@@ -312,6 +339,24 @@ class RedTeamOrchestrator:
                 stats["blocked"] = sum(1 for r in analyzed_results if r["status"] in ("blocked", "guardrail_blocked"))
                 stats["partial"] = sum(1 for r in analyzed_results if r["status"] == "partial")
                 stats["bypass_rate"] = f"{round(stats['bypassed'] / max(stats['total'], 1) * 100, 1)}%"
+                for idx, result in enumerate(analyzed_results):
+                    self.event_callback({
+                        "event": "judge_result",
+                        "round": self.current_round,
+                        "index": idx,
+                        "verdict": result["status"],
+                        "latency_ms": result.get("latency_ms", 0),
+                    })
+
+            else:
+                for idx, result in enumerate(analyzed_results):
+                    self.event_callback({
+                        "event": "judge_result",
+                        "round": self.current_round,
+                        "index": idx,
+                        "verdict": result["status"],
+                        "latency_ms": result.get("latency_ms", 0),
+                    })
 
             # ── Step 6: 会话管理 ──
             round_successful = []
@@ -323,15 +368,35 @@ class RedTeamOrchestrator:
 
                 if r["status"] == "bypassed":
                     round_successful.append(r)
-                    self._add_session(r, r.get("type", "new"))
+                    self._add_session(r, r.get("type", "new"), session_goal="deepen")
                     cat = r.get("target_category", "")
                     if cat and cat not in self.covered_categories:
                         self.covered_categories.append(cat)
+                elif r["status"] == "partial":
+                    if r.get("type") == "continue" and r.get("session_id"):
+                        # 续攻返回 partial：escalate session 视为未进步
+                        sid = r["session_id"]
+                        if sid in self.active_sessions:
+                            sess = self.active_sessions[sid]
+                            if sess.get("session_goal") == "escalate":
+                                sess["consecutive_failures"] = sess.get("consecutive_failures", 0) + 1
+                                if sess["consecutive_failures"] >= self._session_fail_tolerance:
+                                    self._kill_session(sid, f"escalate续攻{sess['consecutive_failures']}次未突破")
+                            # deepen session 收到 partial 不算失败（仍在探索）
+                    else:
+                        # 新攻 partial → 创建 escalate session
+                        self._add_session(r, "new", session_goal="escalate")
+                    failed_responses.append(r)
                 else:
                     failed_responses.append(r)
-                    # 续攻失败 → 杀掉会话
+                    # 续攻失败（blocked）→ 累计连续失败次数
                     if r.get("type") == "continue" and r.get("session_id"):
-                        self._kill_session(r["session_id"], f"续攻失败: {r['status']}")
+                        sid = r["session_id"]
+                        if sid in self.active_sessions:
+                            sess = self.active_sessions[sid]
+                            sess["consecutive_failures"] = sess.get("consecutive_failures", 0) + 1
+                            if sess["consecutive_failures"] >= self._session_fail_tolerance:
+                                self._kill_session(sid, f"续攻连续{sess['consecutive_failures']}次失败")
 
             self.event_callback({
                 "event": "session_update",
@@ -346,44 +411,46 @@ class RedTeamOrchestrator:
                 ],
             })
 
-            # ── Step 7: 边界追踪 (结构化矩阵 + 可选LLM摘要) ──
-            # 7a: 记录全部结果到边界矩阵（确定性，零延迟）
+            # ── Step 7: 防御指纹管线 ──
+            # 7a: 持久化原始记录
             record_boundaries(analyzed_results, self.current_round)
-            matrix = build_matrix()
-            matrix_intel = format_boundary_intel(matrix)
-            if matrix_intel:
-                self.kb5_summary = matrix_intel
+
+            # 7b: 三层防御情报分析
+            if self._boundary_client and failed_responses and _parse_bool(self.config.get("agent3_enabled"), default=True):
+                self.event_callback({"event": "boundary_analysis", "round": self.current_round})
+
+                fingerprints = fingerprint_batch(
+                    results=failed_responses,
+                    llm_client=self._boundary_client,
+                    max_workers=10,
+                )
+
+                if fingerprints:
+                    new_patterns = aggregate_fingerprints(fingerprints)
+                    self._defense_profile = merge_with_history(
+                        new_patterns=new_patterns,
+                        existing_profile=self._defense_profile,
+                        current_round=self.current_round,
+                        stale_threshold=3,
+                    )
+                    self.kb5_summary = format_defense_intel(self._defense_profile)
+
                 self.event_callback({
                     "event": "kb5_updated",
                     "round": self.current_round,
                     "summary": self.kb5_summary,
+                    "fingerprint_count": len(fingerprints) if fingerprints else 0,
+                    "pattern_count": len(self._defense_profile),
                 })
-
-            # 7b: 可选LLM补充（保留旧逻辑作为额外战术建议）
-            if failed_responses and _parse_bool(self.config.get("agent3_enabled"), default=True):
-                self.event_callback({"event": "boundary_analysis", "round": self.current_round})
-                llm_advice = infer_boundary_summary(
-                    agent_api_url=self.config.get("agent_api_url", ""),
-                    agent_api_key=self.config.get("agent_api_key", ""),
-                    agent_model=self.config.get("agent_model", "deepseek-chat"),
-                    failed_responses=failed_responses,
-                    target_model_name=self.config.get("target_model", "unknown"),
-                    round_num=self.current_round,
-                    prev_summary="",
-                )
-                if llm_advice and matrix_intel:
-                    self.kb5_summary += f"\nLLM战术建议: {llm_advice}"
-                elif llm_advice:
-                    self.kb5_summary = llm_advice
 
             # ── Step 8: 统计 ──
             bypassed_this_round = stats["bypassed"]
             total_bypassed += bypassed_this_round
 
             if bypassed_this_round == 0:
-                consecutive_zero += 1
+                self._consecutive_zero_rounds += 1
             else:
-                consecutive_zero = 0
+                self._consecutive_zero_rounds = 0
 
             self.all_successful_prompts.extend(round_successful)
 
@@ -394,6 +461,8 @@ class RedTeamOrchestrator:
                 round_num=self.current_round,
                 covered_categories=self.covered_categories,
                 successful_prompts=round_successful,
+                total_slots=self._effective_concurrency,
+                consecutive_zero_rounds=self._consecutive_zero_rounds,
             )
 
             # ── Step 10: 生成反馈 ──
@@ -433,6 +502,7 @@ class RedTeamOrchestrator:
                         "promptId": r.get("prompt_id", ""),
                         "promptText": r.get("prompt_text", ""),
                         "modelResponse": r.get("response_text", ""),
+                        "reasoningText": r.get("reasoning_text", ""),
                         "jailbreakStatus": r["status"],
                         "promptType": r.get("type", "new"),
                         "sessionId": r.get("session_id", ""),
@@ -442,6 +512,7 @@ class RedTeamOrchestrator:
                         "signals": r.get("cot_signals", []),
                         "latencyMs": r.get("latency_ms", 0),
                         "judge_reason": r.get("judge_reason", ""),
+                        "judge_confidence": r.get("judge_confidence", 0),
                         "error": r.get("error"),
                     }
                     for r in analyzed_results
@@ -457,9 +528,6 @@ class RedTeamOrchestrator:
 
             # ── Step 11: 收敛检查 ──
             should_stop, stop_reason = check_convergence(self.stats_history, self.config)
-            if consecutive_zero >= cooldown_limit:
-                should_stop = True
-                stop_reason = f"连续 {cooldown_limit} 轮零成功，提前终止"
 
             if should_stop:
                 self.event_callback({"event": "stopped", "reason": stop_reason, "round": self.current_round})
@@ -497,11 +565,17 @@ class RedTeamOrchestrator:
         cont_prompts = []
 
         self._sync_runtime_from_legacy_state()
+        if self.stats_history:
+            last_stats = self.stats_history[-1]
+            recent_success_rate = last_stats["bypassed"] / max(last_stats["total"], 1)
+        else:
+            recent_success_rate = 0.0
         budget = allocate_round_budget(
-            total_slots=10,
+            total_slots=self._effective_concurrency,
             active_session_count=len(self.active_sessions),
-            recent_success_rate=(len(self.all_successful_prompts[-5:]) / 5.0) if self.all_successful_prompts else 0.0,
+            recent_success_rate=recent_success_rate,
             repeated_pattern_ratio=0.0,
+            allow_continuation=self._allow_continuation,
         )
         round_context = RoundContext(
             current_round=self.current_round,
@@ -513,7 +587,7 @@ class RedTeamOrchestrator:
             active_sessions=self.session_store.snapshot(),
             current_round=self.current_round,
             allow_continuation=self._allow_continuation,
-            continuation_budget=self._continuation_budget,
+            continuation_budget=min(self._continuation_budget, len(self.active_sessions)) if self.active_sessions else 0,
             continuation_fresh_ratio=self._continuation_fresh_ratio,
             continuation_cluster_cap=self._continuation_cluster_cap,
             scheduler=select_continuation_sessions,
@@ -529,15 +603,18 @@ class RedTeamOrchestrator:
         )
 
         try:
-            new_prompts, cont_prompts = claude_agent.generate_parallel(
+            new_prompts, cont_prompts = prompt_generator.generate_parallel(
                 round_num=self.current_round,
                 strategy=new_attack_payload["strategy"],
                 kb5_summary=new_attack_payload.get("kb5_summary", ""),
                 history_feedback=new_attack_payload.get("history_feedback", ""),
                 successful_prompts=new_attack_payload.get("successful_prompts"),
                 active_sessions=sessions_for_cont if sessions_for_cont else None,
-                timeout=180.0,
+                timeout=300.0,
                 settings_path=self._claude_agent_settings,
+                new_attack_slots=budget["new_attack_slots"],
+                llm_client=self._generator_client,
+                generation_batch_size=self._generation_batch_size,
             )
             self.event_callback({"event": "info", "round": self.current_round, "message": f"智能体生成完成: {len(new_prompts)}新攻 + {len(cont_prompts)}续攻"})
         except Exception as e:
@@ -547,10 +624,12 @@ class RedTeamOrchestrator:
         return new_prompts, cont_prompts
 
     def _call_target_batch(self, all_prompts: list[dict]) -> list[dict]:
-        """并发调用待测模型，支持新对话和续攻（带历史）"""
+        """并发调用待测模型，支持新对话和续攻（带历史），含 429 自适应退让"""
         results = [None] * len(all_prompts)
+        rate_limit_hits = 0
 
         def call_one(idx: int, prompt_data: dict) -> dict:
+            nonlocal rate_limit_hits
             if self._stopped:
                 return {"error": "stopped", "prompt_text": prompt_data.get("prompt_text", "")}
 
@@ -577,6 +656,10 @@ class RedTeamOrchestrator:
                     },
                 )
 
+            # 429 检测
+            if result.get("error") and "429" in str(result.get("error", "")):
+                rate_limit_hits += 1
+
             result["type"] = prompt_type
             result["session_id"] = session_id
             result["prompt_id"] = prompt_data.get("prompt_id", f"p{idx:02d}")
@@ -595,7 +678,7 @@ class RedTeamOrchestrator:
 
             return result
 
-        max_workers = min(15, len(all_prompts))
+        max_workers = min(self._effective_concurrency, len(all_prompts))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {}
             for i, p in enumerate(all_prompts):
@@ -615,6 +698,25 @@ class RedTeamOrchestrator:
                         "prompt_id": all_prompts[idx].get("prompt_id", ""),
                         "target_category": all_prompts[idx].get("target_category", ""),
                     }
+
+        # 429 自适应退让：本轮有 3+ 次 429，下轮降并发到 50%
+        if rate_limit_hits >= 3:
+            new_concurrency = max(5, self._effective_concurrency // 2)
+            logger.warning(
+                f"[Orchestrator] 检测到 {rate_limit_hits} 次 429，并发从 {self._effective_concurrency} 降至 {new_concurrency}"
+            )
+            self._effective_concurrency = new_concurrency
+            self.event_callback({
+                "event": "concurrency_backoff",
+                "round": self.current_round,
+                "rate_limit_hits": rate_limit_hits,
+                "new_concurrency": new_concurrency,
+            })
+        elif rate_limit_hits == 0 and self._effective_concurrency < self._target_concurrency:
+            # 无 429 且当前低于目标 → 逐步恢复
+            restored = min(self._target_concurrency, int(self._effective_concurrency * 1.5))
+            logger.info(f"[Orchestrator] 无限流，并发从 {self._effective_concurrency} 恢复至 {restored}")
+            self._effective_concurrency = restored
 
         return [r for r in results if r is not None]
 

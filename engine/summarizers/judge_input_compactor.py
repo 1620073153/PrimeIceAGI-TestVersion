@@ -1,10 +1,11 @@
 def compact_for_judge(result: dict) -> dict:
     return {
         "prompt_id": result.get("prompt_id", ""),
+        "prompt_text": str(result.get("prompt_text", ""))[:500].strip(),
         "target_category": result.get("target_category", ""),
         "status": result.get("status", ""),
         "cot_signals": list(result.get("cot_signals", [])),
-        "response_excerpt": str(result.get("response_text", ""))[:300].strip(),
+        "response_text": str(result.get("response_text", ""))[:1500].strip(),
     }
 
 

@@ -19,6 +19,14 @@ def start_test():
         return err(e.message, 400)
 
 
+@test_bp.route("/api/test/latest")
+def latest_task():
+    task = test_service.get_latest_task()
+    if not task:
+        return ok(None)
+    return ok(task)
+
+
 @test_bp.route("/api/test/<task_id>/stream")
 def stream(task_id: str):
     events = test_service.subscribe_events(task_id)

@@ -1,4 +1,4 @@
-from engine.adapters.claude_agent_adapter import build_new_attack_generation_request
+from engine.adapters.prompt_generator_adapter import build_new_attack_generation_request
 
 from .context_builder import build_new_attack_context
 from .candidate_selector import select_new_attack_candidates

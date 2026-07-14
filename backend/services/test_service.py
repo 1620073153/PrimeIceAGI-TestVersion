@@ -3,7 +3,7 @@
 import time
 import threading
 from engine.orchestrator import RedTeamOrchestrator
-from engine.claude_agent import validate_claude_ready_for_start
+from engine.prompt_generator import validate_generator_ready
 from backend.task_manager import TaskManager
 from backend.event_bus import EventBus
 from backend.schemas import validate_test_config, ValidationError
@@ -22,7 +22,7 @@ def _schedule_event_bus_cleanup(task_id: str):
 
 def start_test(config: dict) -> str:
     config = validate_test_config(config)
-    preflight = validate_claude_ready_for_start(config)
+    preflight = validate_generator_ready(config)
     if not preflight["ok"]:
         raise ValidationError(preflight["message"])
     task_id = _tm.create_task(config)
@@ -62,6 +62,14 @@ def subscribe_events(task_id: str):
     if not task:
         return None
     return _bus.subscribe(task_id, from_beginning=True)
+
+
+def get_latest_task() -> dict | None:
+    tasks = _tm.list_tasks()
+    if not tasks:
+        return None
+    tasks.sort(key=lambda t: t.get("created_at") or 0, reverse=True)
+    return tasks[0]
 
 
 def _run(task_id: str):

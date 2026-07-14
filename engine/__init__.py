@@ -1,4 +1,3 @@
 from engine.llm_client import LLMClient
 from engine.rate_limiter import TokenBucketRateLimiter, AdaptiveRateLimiter
 from engine.target_client import TargetClient, PRESET_TEMPLATES
-from engine.system_prompt_inferrer import infer_boundary_summary

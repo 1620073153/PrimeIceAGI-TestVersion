@@ -134,27 +134,23 @@ def test_runtime_phase1_skeleton_modules_are_importable():
     from engine.runtime.session_cache import SessionCache
     from engine.runtime.success_memory import SuccessMemory
     from engine.runtime.failure_memory import FailureMemory
-    from engine.runtime.scoring_store import ScoringStore
 
     ctx = RoundContext(current_round=3, strategy={"primary_cluster": "B"})
     session_store = SessionStore()
     session_cache = SessionCache()
     success_memory = SuccessMemory()
     failure_memory = FailureMemory()
-    scoring_store = ScoringStore()
 
     session_store.upsert("S-1", {"session_id": "S-1", "target_category": "B-1"})
     session_cache.put("S-1", {"recent_summary": "summary"})
     success_memory.add({"prompt_id": "p01", "target_category": "B-1"})
     failure_memory.add({"prompt_id": "p02", "refusal_guess": "policy_refusal"})
-    scoring_store.put("S-1", {"continuation_value": 1.5})
 
     assert ctx.current_round == 3
     assert session_store.get("S-1")["target_category"] == "B-1"
     assert session_cache.get("S-1")["recent_summary"] == "summary"
     assert success_memory.latest()[0]["prompt_id"] == "p01"
     assert failure_memory.latest()[0]["prompt_id"] == "p02"
-    assert scoring_store.get("S-1")["continuation_value"] == 1.5
 
 
 def test_orchestrator_generate_all_prompts_uses_phase1_pipeline_hooks(monkeypatch):

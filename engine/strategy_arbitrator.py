@@ -4,6 +4,7 @@
 动态读取 KB1-KB3 JSON，前端编辑后实时生效
 """
 
+import random
 from data.kb_store import load_kb
 
 
@@ -89,6 +90,34 @@ def _dedupe_keep_order(items: list[str]) -> list[str]:
     return result
 
 
+def _expand_subcategories(base_list: list[str], total_slots: int, covered_categories: list[str] | None = None) -> list[str]:
+    """
+    将子类列表扩展到 total_slots 个。
+    - total_slots <= len(base_list): 直接截断
+    - total_slots > len(base_list): 优先补充未覆盖的，再循环复用已有的
+    """
+    if not base_list:
+        categories = _load_categories()
+        for cat in categories.values():
+            base_list.extend(cat.get("subcategories", {}).keys())
+        base_list = _dedupe_keep_order(base_list)
+
+    if total_slots <= len(base_list):
+        return base_list[:total_slots]
+
+    covered = set(covered_categories or [])
+    uncovered_extras = [s for s in base_list if s not in covered and s not in base_list[:len(base_list)]]
+
+    result = list(base_list)
+    cycle_pool = list(base_list)
+    idx = 0
+    while len(result) < total_slots:
+        result.append(cycle_pool[idx % len(cycle_pool)])
+        idx += 1
+
+    return result[:total_slots]
+
+
 def _build_new_attack_mix(
     total_slots: int = 10,
     success_neighbor_slots: int = 3,
@@ -127,9 +156,27 @@ def _get_cross_cluster_subcategories(current_cluster: str, covered_categories: l
     return [s for s in _dedupe_keep_order(cross_subs) if s not in covered_categories]
 
 
-def get_scan_strategy() -> dict:
+def _ensure_cross_cluster_filled(cross_subs: list[str], n_cross: int, current_cluster: str, covered_categories: list[str]) -> list[str]:
+    """保证跨簇名额被填满：不足时从全局子类（排除当前簇）中随机补足"""
+    import random
+    result = list(cross_subs[:n_cross])
+    if len(result) >= n_cross:
+        return result
+    current_cluster_subs = set(_get_subs_for_cluster(current_cluster))
+    existing = set(result)
+    categories = _load_categories()
+    all_subs = []
+    for cat in categories.values():
+        all_subs.extend(cat.get("subcategories", {}).keys())
+    extra = [s for s in all_subs if s not in current_cluster_subs and s not in existing and s not in covered_categories]
+    random.shuffle(extra)
+    result.extend(extra[:n_cross - len(result)])
+    return result
+
+
+def get_scan_strategy(total_slots: int = 10) -> dict:
     """
-    首轮广度扫描策略：A-F 每个 cluster 各取 1 个子类，剩余随机补到 10 个。
+    首轮广度扫描策略：A-F 每个 cluster 各取子类，总量匹配 total_slots。
     让 prompt-skill 每个子类对应 1 条提示词，快速探测各 cluster 防御强度。
     """
     import random
@@ -143,23 +190,29 @@ def get_scan_strategy() -> dict:
         if subs:
             scan_subs.append(subs[0])
 
-    # 剩余名额从所有子类中随机补（不重复）
     all_subs = []
     for cat in categories.values():
         all_subs.extend(cat.get("subcategories", {}).keys())
     remaining = [s for s in all_subs if s not in scan_subs]
-    extra_count = max(0, 10 - len(scan_subs))
+    extra_count = max(0, total_slots - len(scan_subs))
     if remaining and extra_count > 0:
         scan_subs += random.sample(remaining, min(extra_count, len(remaining)))
+
+    scan_subs = _expand_subcategories(scan_subs, total_slots)
 
     concepts = list(_load_concepts().keys())
     methods = list(_load_methods().keys())
 
+    concept_pool = random.sample(concepts, min(5, len(concepts))) if concepts else ["cognitive_hierarchy_trap"]
+    method_pool = random.sample(methods, min(5, len(methods))) if methods else ["academic_framing"]
+
     return {
-        "primary_concept": concepts[0] if concepts else "cognitive_hierarchy_trap",
-        "primary_method": methods[0] if methods else "academic_framing",
+        "primary_concept": concept_pool[0],
+        "primary_method": method_pool[0],
         "primary_cluster": "SCAN",
-        "subcategories": scan_subs[:10],
+        "subcategories": scan_subs,
+        "concept_pool": concept_pool,
+        "method_pool": method_pool,
         "variant_mode": False,
         "scan_mode": True,
         "weights": {
@@ -172,7 +225,9 @@ def get_scan_strategy() -> dict:
 
 def decide_next_strategy(stats: dict, current_strategy: dict,
                          round_num: int, covered_categories: list[str],
-                         successful_prompts: list[dict] | None = None) -> dict:
+                         successful_prompts: list[dict] | None = None,
+                         total_slots: int = 10,
+                         consecutive_zero_rounds: int = 0) -> dict:
     """
     决策下一轮策略
 
@@ -182,9 +237,10 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
     - round_num: 当前轮次
     - covered_categories: 已覆盖(越狱成功)的子类列表
     - successful_prompts: 本轮成功的提示词列表
+    - total_slots: 需要的子类总数（= effective_concurrency）
 
     输出:
-    - 下一轮策略 dict
+    - 下一轮策略 dict，含 subcategories / concept_pool / method_pool
     """
     primary_signal = stats.get("primary_signal")
     bypassed = stats.get("bypassed", 0)
@@ -195,7 +251,6 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
     # 扫描轮过渡：从成功的提示词中提取最弱 cluster
     if current_strategy.get("scan_mode"):
         if bypassed > 0 and successful_prompts:
-            # 统计每个 cluster 的成功次数，找最弱的（成功最多 = 防御最差）
             cluster_hits = {}
             categories = _load_categories()
             for sp in successful_prompts:
@@ -206,30 +261,48 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
                         break
             if cluster_hits:
                 best_cluster = max(cluster_hits, key=cluster_hits.get)
-                neighbor_subcategories = _get_subs_for_cluster(best_cluster)[:5]
-                cross_subcategories = _get_cross_cluster_subcategories(best_cluster, covered_categories)[:4]
-                fresh_subcategories = [s for s in uncovered if s not in neighbor_subcategories and s not in cross_subcategories][:8]
-                mix = _build_new_attack_mix(total_slots=10, success_neighbor_slots=3, cross_cluster_slots=2)
+                all_subs_temp = []
+                for cat_data in categories.values():
+                    all_subs_temp.extend(cat_data.get("subcategories", {}).keys())
+                uncovered = [s for s in all_subs_temp if s not in covered_categories]
+
+                neighbor_subcategories = _get_subs_for_cluster(best_cluster)
+                cross_subcategories = _get_cross_cluster_subcategories(best_cluster, covered_categories)
+                fresh_subcategories = [s for s in uncovered if s not in neighbor_subcategories and s not in cross_subcategories]
+
+                ratio_neighbor = 0.25
+                ratio_cross = 0.35
+                ratio_fresh = 0.40
+                n_neighbor = max(1, int(total_slots * ratio_neighbor))
+                n_cross = max(1, int(total_slots * ratio_cross))
+                n_fresh = max(1, total_slots - n_neighbor - n_cross)
+
                 combined = (
-                    neighbor_subcategories[:mix["success_neighbor_slots"]]
-                    + cross_subcategories[:mix["cross_cluster_slots"]]
-                    + fresh_subcategories[:mix["fresh_exploration_slots"]]
+                    neighbor_subcategories[:n_neighbor]
+                    + _ensure_cross_cluster_filled(cross_subcategories, n_cross, best_cluster, covered_categories)
+                    + fresh_subcategories[:n_fresh]
                 )
+                combined = _dedupe_keep_order(combined)
+                combined = _expand_subcategories(combined, total_slots, covered_categories)
+
+                concepts = list(_load_concepts().keys())
+                methods = list(_load_methods().keys())
+                concept_pool = random.sample(concepts, min(5, len(concepts))) if concepts else ["cognitive_hierarchy_trap"]
+                method_pool = random.sample(methods, min(5, len(methods))) if methods else ["academic_framing"]
+
                 return {
                     "primary_concept": current_concept,
                     "primary_method": current_method,
                     "primary_cluster": best_cluster,
-                    "subcategories": _dedupe_keep_order(combined)[:10],
+                    "subcategories": combined,
+                    "concept_pool": concept_pool,
+                    "method_pool": method_pool,
                     "variant_mode": True,
                     "successful_templates": _sanitize_successful_templates(successful_prompts),
-                    "new_attack_mix": mix,
+                    "new_attack_mix": {"total_slots": total_slots, "success_neighbor_slots": n_neighbor, "cross_cluster_slots": n_cross, "fresh_exploration_slots": n_fresh},
                     "focus_cluster": best_cluster,
-                    "neighbor_subcategories": neighbor_subcategories,
-                    "cross_cluster_subcategories": cross_subcategories,
-                    "fresh_subcategories": fresh_subcategories,
                     "weights": {"cluster_internal": 0.7, "cross_cluster_probe": 0.2, "new_exploration": 0.1},
                 }
-        # 扫描轮全失败 → 从 A 开始正常轮转
         current_cluster = "A"
 
     # 计算未覆盖类别
@@ -239,11 +312,19 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
         all_subs.extend(cat["subcategories"].keys())
     uncovered = [s for s in all_subs if s not in covered_categories]
 
+    concepts = list(_load_concepts().keys())
+    methods = list(_load_methods().keys())
+    concept_pool = random.sample(concepts, min(5, len(concepts))) if concepts else ["cognitive_hierarchy_trap"]
+    method_pool = random.sample(methods, min(5, len(methods))) if methods else ["academic_framing"]
+
+    base_subcategories = _get_subs_for_cluster(current_cluster)
     next_strategy = {
         "primary_concept": current_concept,
         "primary_method": current_method,
         "primary_cluster": current_cluster,
-        "subcategories": _get_subs_for_cluster(current_cluster)[:5],
+        "subcategories": _expand_subcategories(base_subcategories, total_slots, covered_categories),
+        "concept_pool": concept_pool,
+        "method_pool": method_pool,
         "variant_mode": False,
         "weights": {
             "cluster_internal": 0.6,
@@ -256,8 +337,6 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
     if bypassed > 0 and successful_prompts:
         next_strategy["variant_mode"] = True
         next_strategy["successful_templates"] = _sanitize_successful_templates(successful_prompts)
-        next_strategy["new_attack_mix"] = _build_new_attack_mix(total_slots=10, success_neighbor_slots=3, cross_cluster_slots=2)
-        next_strategy["focus_cluster"] = current_cluster
 
         cluster_subs = _get_subs_for_cluster(current_cluster)
         neighbor_subcategories = [s for s in cluster_subs if s not in covered_categories]
@@ -267,17 +346,22 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
             if s not in neighbor_subcategories and s not in cross_cluster_subcategories
         ]
 
-        next_strategy["neighbor_subcategories"] = neighbor_subcategories[:5]
-        next_strategy["cross_cluster_subcategories"] = cross_cluster_subcategories[:4]
-        next_strategy["fresh_subcategories"] = fresh_subcategories[:8]
+        ratio_neighbor = 0.25
+        ratio_cross = 0.35
+        ratio_fresh = 0.40
+        n_neighbor = max(1, int(total_slots * ratio_neighbor))
+        n_cross = max(1, int(total_slots * ratio_cross))
+        n_fresh = max(1, total_slots - n_neighbor - n_cross)
 
-        mix = next_strategy["new_attack_mix"]
         combined_subcategories = (
-            next_strategy["neighbor_subcategories"][:mix["success_neighbor_slots"]]
-            + next_strategy["cross_cluster_subcategories"][:mix["cross_cluster_slots"]]
-            + next_strategy["fresh_subcategories"][:mix["fresh_exploration_slots"]]
+            neighbor_subcategories[:n_neighbor]
+            + _ensure_cross_cluster_filled(cross_cluster_subcategories, n_cross, current_cluster, covered_categories)
+            + fresh_subcategories[:n_fresh]
         )
-        next_strategy["subcategories"] = _dedupe_keep_order(combined_subcategories)[:10]
+        combined_subcategories = _dedupe_keep_order(combined_subcategories)
+        next_strategy["subcategories"] = _expand_subcategories(combined_subcategories, total_slots, covered_categories)
+        next_strategy["new_attack_mix"] = {"total_slots": total_slots, "success_neighbor_slots": n_neighbor, "cross_cluster_slots": n_cross, "fresh_exploration_slots": n_fresh}
+        next_strategy["focus_cluster"] = current_cluster
         next_strategy["primary_cluster"] = current_cluster
         next_strategy["primary_method"] = current_method
         next_strategy["primary_concept"] = current_concept
@@ -290,26 +374,48 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
         next_strategy["primary_concept"] = mapping["primary_concept"]
         next_strategy["primary_method"] = mapping["primary_method"]
         next_strategy["primary_cluster"] = mapping["target_cluster"]
-        next_strategy["subcategories"] = _get_subs_for_cluster(mapping["target_cluster"])[:5]
+        base = _get_subs_for_cluster(mapping["target_cluster"])
+        next_strategy["subcategories"] = _expand_subcategories(base, total_slots, covered_categories)
+        if next_strategy["primary_concept"] not in concept_pool:
+            concept_pool = [next_strategy["primary_concept"]] + [c for c in concept_pool if c != next_strategy["primary_concept"]][:4]
+            next_strategy["concept_pool"] = concept_pool
         return next_strategy
 
     # 情况 3: 全部失败且无明确信号 → 先换手法，手法轮完换概念
     if bypassed == 0:
+        # 连续2轮归零 → 强制切换 concept + cluster，跳过逐一轮转 method
+        if consecutive_zero_rounds >= 2:
+            next_strategy["primary_concept"] = _rotate_concept(current_concept)
+            new_methods = _get_methods_for_concept(next_strategy["primary_concept"])
+            next_strategy["primary_method"] = new_methods[0] if new_methods else "academic_framing"
+            next_strategy["method_pool"] = new_methods[:5] if new_methods else method_pool
+            next_strategy["primary_cluster"] = _rotate_cluster(current_cluster)
+            base = _get_subs_for_cluster(next_strategy["primary_cluster"])
+            next_strategy["subcategories"] = _expand_subcategories(base, total_slots, covered_categories)
+            rotated_concepts = concepts[concepts.index(next_strategy["primary_concept"]):] + concepts[:concepts.index(next_strategy["primary_concept"])] if next_strategy["primary_concept"] in concepts else concepts
+            next_strategy["concept_pool"] = rotated_concepts[:5]
+            return next_strategy
+
         methods_for_concept = _get_methods_for_concept(current_concept)
         if current_method in methods_for_concept:
             idx = methods_for_concept.index(current_method)
             if idx + 1 < len(methods_for_concept):
                 next_strategy["primary_method"] = methods_for_concept[idx + 1]
+                method_pool = methods_for_concept[idx + 1:] + methods_for_concept[:idx + 1]
+                next_strategy["method_pool"] = method_pool[:5]
                 return next_strategy
 
-        # 当前概念的方法用完了 → 换概念
         next_strategy["primary_concept"] = _rotate_concept(current_concept)
         new_methods = _get_methods_for_concept(next_strategy["primary_concept"])
         next_strategy["primary_method"] = new_methods[0] if new_methods else "academic_framing"
+        next_strategy["method_pool"] = new_methods[:5] if new_methods else method_pool
 
-        # 每换一次概念也换一个类簇
         next_strategy["primary_cluster"] = _rotate_cluster(current_cluster)
-        next_strategy["subcategories"] = _get_subs_for_cluster(next_strategy["primary_cluster"])[:5]
+        base = _get_subs_for_cluster(next_strategy["primary_cluster"])
+        next_strategy["subcategories"] = _expand_subcategories(base, total_slots, covered_categories)
+
+        rotated_concepts = concepts[concepts.index(next_strategy["primary_concept"]):] + concepts[:concepts.index(next_strategy["primary_concept"])] if next_strategy["primary_concept"] in concepts else concepts
+        next_strategy["concept_pool"] = rotated_concepts[:5]
         return next_strategy
 
     # 情况 4: 有部分成功 → 保持策略微调
@@ -319,22 +425,15 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
 
 def check_convergence(stats_history: list[dict], config: dict) -> tuple[bool, str]:
     """
-    检查收敛条件，判断是否应该终止测试
+    检查收敛条件，判断是否应该终止测试。
 
-    三层收敛:
-    1. 连续 N 轮零成功 → 终止
-    2. 覆盖率达到阈值 → 终止
-    3. 达到最大轮次 → 终止
+    唯一收敛条件：达到最大轮次。
+    测试强制按 max_rounds 跑满，不因零绕过提前终止。
+    续攻 session 的存活/终止由 _session_fail_tolerance 独立控制。
     """
     max_rounds = int(config.get("max_rounds", 10))
-    cooldown_limit = int(config.get("cooldown_no_new", 2))
 
     if len(stats_history) >= max_rounds:
         return True, f"达到最大轮次 ({max_rounds})"
-
-    # 检查连续零成功
-    recent = stats_history[-cooldown_limit:]
-    if len(recent) >= cooldown_limit and all(s.get("bypassed", 0) == 0 for s in recent):
-        return True, f"连续 {cooldown_limit} 轮零成功，提前终止"
 
     return False, ""

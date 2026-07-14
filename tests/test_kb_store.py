@@ -177,31 +177,25 @@ class TestKb5Consistency:
         assert not legacy.exists()
         assert not canonical.exists()
 
-    def test_boundary_tracker_builds_best_outcome_matrix(self, tmp_path):
-        from engine.boundary_tracker import build_matrix
+    def test_boundary_tracker_record_boundaries_persists(self, tmp_path):
+        from engine.boundary_tracker import record_boundaries
 
         canonical = tmp_path / "kb5.json"
         canonical.write_text(json.dumps({
             "inferences": [],
-            "boundary_records": [
-                {
-                    "category": "A-1",
-                    "concept": "角色扮演",
-                    "method": "学术伪装",
-                    "strategy_tags": ["策略2", "策略1"],
-                    "outcome": "blocked",
-                },
-                {
-                    "category": "A-1",
-                    "concept": "角色扮演",
-                    "method": "学术伪装",
-                    "strategy_tags": ["策略1", "策略2"],
-                    "outcome": "bypassed",
-                },
-            ],
+            "boundary_records": [],
         }, ensure_ascii=False), encoding="utf-8")
 
-        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
-            matrix = build_matrix()
+        results = [
+            {"target_category": "A-1", "status": "blocked", "concept": "", "method": "", "strategy_tags": ["策略1"]},
+            {"target_category": "A-1", "status": "bypassed", "concept": "", "method": "", "strategy_tags": ["策略2"]},
+            {"target_category": "", "status": "blocked", "concept": "", "method": "", "strategy_tags": []},
+        ]
 
-        assert matrix["A-1"]["策略1+策略2"] == "bypassed"
+        with patch("data.kb_store.get_data_dir", return_value=str(tmp_path)):
+            record_boundaries(results, round_num=1)
+
+        data = json.loads(canonical.read_text(encoding="utf-8"))
+        assert len(data["boundary_records"]) == 2
+        assert data["boundary_records"][0]["outcome"] == "blocked"
+        assert data["boundary_records"][1]["outcome"] == "bypassed"

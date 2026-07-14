@@ -7,19 +7,42 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
 </head>
 <body>
-<div class="app">
-  <header>
-    <h1>PrimeIceAGI</h1>
-    <div class="subtitle">LLM Content Security Red-Team Automation</div>
-    <a class="btn btn-ghost btn-sm" href="/batch">批量评估模式</a>
-    <button class="theme-toggle" title="切换主题">&#9790;</button>
-  </header>
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1><span class="shield">&#9741;</span> PrimeIceAGI</h1>
+      <div class="ver">大模型内容安全红队自动化平台</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-title">测试管理</div>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-nav="nav-test"><span class="nav-icon">&#9673;</span> 测试中心</button>
+      <button class="nav-tab" data-nav="nav-kb"><span class="nav-icon">&#128218;</span> 知识库管理</button>
+      <button class="nav-tab" data-nav="nav-sessions"><span class="nav-icon">&#128193;</span> 历史会话</button>
+    </div>
+    <div class="nav-section" style="margin-top:16px">
+      <div class="nav-section-title">其他</div>
+    </div>
+    <div class="nav-tabs">
+      <a class="nav-tab" href="/batch"><span class="nav-icon">&#9862;</span> 批量评估</a>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-avatar">P</div>
+      <div class="sidebar-info">
+        <div class="name">PrimeIceAGI</div>
+        <div>v0.4.7-beta</div>
+      </div>
+    </div>
+  </aside>
 
-  <div class="nav-tabs">
-    <button class="nav-tab active" data-nav="nav-test">测试中心</button>
-    <button class="nav-tab" data-nav="nav-kb">知识库管理</button>
-    <button class="nav-tab" data-nav="nav-sessions">历史会话</button>
-  </div>
+  <!-- Main Content -->
+  <div class="app">
+    <header>
+      <h1>测试中心</h1>
+      <div class="subtitle">LLM Content Security Red-Team Automation</div>
+    </header>
 
   <div id="nav-test" class="nav-panel">
     <div class="card" id="config-card">
@@ -31,12 +54,12 @@
         <button class="tab-btn" data-tab="tab-params">测试参数</button>
       </div>
       <div class="tab-panel active" id="tab-agent">
-        <div id="claude-agent-fields">
+        <div id="generator-fields">
           <div class="form-grid">
-            <div class="form-group"><label>API 地址</label><input id="claude_agent_url" placeholder="https://api.deepseek.com/anthropic"><span class="hint">Anthropic Messages API 兼容端点</span></div>
-            <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="claude_agent_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="claude_agent_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
-            <div class="form-group"><label>模型名</label><input id="claude_agent_model" placeholder="deepseek-v4-pro"></div>
-            <div class="form-group"><label>&nbsp;</label><div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" id="btn-load-claude-cfg">加载配置</button><button class="btn btn-ghost btn-sm" id="btn-save-claude-cfg">保存配置</button><button class="btn btn-ghost btn-sm" id="btn-sync-aux" title="将当前配置同步到辅助模型">⇒ 同步到辅助模型</button></div><span id="claude-cfg-status" class="hint"></span></div>
+            <div class="form-group"><label>API 地址</label><input id="generator_url" placeholder="https://api.deepseek.com"><span class="hint">OpenAI Chat Completions 兼容端点</span></div>
+            <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="generator_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="generator_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+            <div class="form-group"><label>模型名</label><input id="generator_model" placeholder="deepseek-v4-pro"></div>
+            <div class="form-group"><label>&nbsp;</label><div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" id="btn-save-gen-cfg">保存配置</button><button class="btn btn-ghost btn-sm" id="btn-load-gen-cfg">加载配置</button><button class="btn btn-ghost btn-sm" id="btn-sync-aux" title="将当前配置同步到辅助模型">⇒ 同步到辅助模型</button></div><span id="gen-cfg-status" class="hint"></span></div>
           </div>
         </div>
       </div>
@@ -44,9 +67,9 @@
       <div class="tab-panel" id="tab-aux">
         <div class="form-grid">
           <div class="form-group full"><span class="hint">裁判(Agent2)和边界分析(Agent3)共用，OpenAI 兼容格式</span></div>
-          <div class="form-group"><label>API 地址</label><input id="agent_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"><span class="hint">OpenAI Chat Completions 端点</span></div>
+          <div class="form-group"><label>API 地址</label><input id="agent_api_url" placeholder="https://api.deepseek.com"><span class="hint">OpenAI Chat Completions 端点</span></div>
           <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="agent_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="agent_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
-          <div class="form-group"><label>模型名</label><input id="agent_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
+          <div class="form-group"><label>模型名</label><input id="agent_model" placeholder="deepseek-chat"></div>
         </div>
       </div>
       <div class="tab-panel" id="tab-target">
@@ -54,9 +77,9 @@
           <div class="form-group"><label>API 模板</label><select id="template_name"><option value="openai_compatible">OpenAI 兼容格式</option><option value="anthropic_compatible">Anthropic 兼容格式</option><option value="custom">自定义模板</option></select></div>
         </div>
         <div class="form-grid" id="target-standard-fields">
-          <div class="form-group"><label>API 地址</label><input id="target_api_url" placeholder="https://api.deepseek.com" value="https://api.deepseek.com"></div>
+          <div class="form-group"><label>API 地址</label><input id="target_api_url" placeholder="https://api.deepseek.com"></div>
           <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="target_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="target_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
-          <div class="form-group"><label>模型名</label><input id="target_model" placeholder="deepseek-chat" value="deepseek-chat"></div>
+          <div class="form-group"><label>模型名</label><input id="target_model" placeholder="deepseek-chat"></div>
         </div>
         <div id="custom-template-section" style="display:none;margin-top:16px">
           <div class="form-group full" style="margin-bottom:12px">
@@ -123,6 +146,7 @@
       </div>
       <div class="tab-panel" id="tab-params">
         <div class="form-grid">
+          <div class="form-group"><label>并发数</label><input id="target_concurrency" type="number" min="5" max="200" value="10"><span class="hint">每轮同时发送的提示词数量</span></div>
           <div class="form-group"><label>最大轮次</label><input id="max_rounds" type="number" min="1" max="50" value="5"></div>
           <div class="form-group"><label>连续零成功终止</label><input id="cooldown_no_new" type="number" min="1" max="10" value="2"><span class="hint">连续 N 轮零成功则终止</span></div>
           <div class="form-group"><label>续攻模式</label><select id="allow_continuation"><option value="true" selected>开启</option><option value="false">关闭</option></select><span class="hint">对成功会话生成续攻</span></div>
@@ -136,7 +160,7 @@
       <div class="actions">
         <button class="btn btn-primary" id="btn-start">开始测试</button>
         <button class="btn btn-danger" id="btn-stop" style="display:none">终止</button>
-        <button class="btn btn-ghost btn-sm" data-action="probe">连通性检测</button>
+        <button class="btn btn-ghost" data-action="probe">连通性检测</button>
         <span id="probe-status" class="hint"></span>
       </div>
     </div>
@@ -205,7 +229,8 @@
       <div id="sessions-list">加载中...</div>
     </div>
   </div>
-</div>
+  </div>
+</div><!-- /.layout -->
 
 <div id="kb5-cleanup-banner" class="toast info" style="display:none;top:20px;right:20px;bottom:auto;left:auto;transform:none;max-width:320px;z-index:1200">
   <span>本次测试已完成，是否清理 KB5？</span>

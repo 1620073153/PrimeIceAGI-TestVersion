@@ -13,6 +13,34 @@ var App = {
   maxRounds: function () { return parseInt(document.getElementById('max_rounds').value) || 5; }
 };
 
+/* ── Name Mapping (key→中文) ── */
+var NameMap = { categories: {}, concepts: {}, methods: {} };
+function loadNameMaps() {
+  fetch('/api/knowledge/standards').then(function(r){return r.json()}).then(function(d){
+    if (d.ok && d.data && d.data.categories) {
+      Object.keys(d.data.categories).forEach(function(ck){
+        var subs = d.data.categories[ck].subcategories || {};
+        Object.keys(subs).forEach(function(sk){ NameMap.categories[sk] = subs[sk]; });
+      });
+    }
+  }).catch(function(){});
+  fetch('/api/knowledge/concepts').then(function(r){return r.json()}).then(function(d){
+    if (d.ok && d.data && d.data.concepts) {
+      Object.keys(d.data.concepts).forEach(function(k){ NameMap.concepts[k] = d.data.concepts[k].name || k; });
+    }
+  }).catch(function(){});
+  fetch('/api/knowledge/methods').then(function(r){return r.json()}).then(function(d){
+    if (d.ok && d.data && d.data.methods) {
+      Object.keys(d.data.methods).forEach(function(k){ NameMap.methods[k] = d.data.methods[k].name || k; });
+    }
+  }).catch(function(){});
+}
+function toCn(type, key) {
+  if (!key) return '';
+  var map = NameMap[type] || {};
+  return map[key] || key;
+}
+
 /* ── Logging ── */
 var Log = {
   add: function (text, cls) {
@@ -53,7 +81,7 @@ var Tracks = {
     bar.style.width = '100%';
     bar.className = 'track-bar-fill ' + status;
     time.textContent = (latency / 1000).toFixed(1) + 's';
-    var labels = { bypassed: '绕过', blocked: '拒绝', guardrail: '护栏', false_positive: '假阳性' };
+    var labels = { bypassed: '绕过', blocked: '拒绝', guardrail: '护栏', false_positive: '假阳性', pending: '已响应', partial: '部分' };
     stat.textContent = labels[status] || status;
     stat.className = 'track-status ' + status;
   },
@@ -154,7 +182,9 @@ var EventBus = {
         else label += ' [新攻]';
         Tracks.updateLabel(evt.index, label);
         if (evt.status === 'ok') {
-          Tracks.done(evt.index, 'bypassed', evt.latency_ms || 0);
+          Tracks.done(evt.index, 'pending', evt.latency_ms || 0);
+        } else {
+          Tracks.done(evt.index, 'blocked', evt.latency_ms || 0);
         }
         break;
       case 'analyzing':
@@ -164,6 +194,7 @@ var EventBus = {
       case 'judging':
         document.getElementById('live-phase').textContent = '裁判判定中 (并行)...';
         Log.add('裁判并行判定中...', 'info');
+        for (var ji = 0; ji < App.trackCount; ji++) { Tracks.setJudging(ji); }
         break;
       case 'judge_result':
         Tracks.done(evt.index, evt.verdict, evt.latency_ms || 0);
@@ -259,7 +290,7 @@ document.addEventListener('click', function (e) {
 
 /* ── Theme ── */
 function getTheme() { return localStorage.getItem(App.THEME_KEY) || 'dark'; }
-function applyTheme(t) { document.body.classList.toggle('theme-light', t === 'light'); document.querySelector('.theme-toggle').innerHTML = t === 'light' ? '&#9788;' : '&#9790;'; localStorage.setItem(App.THEME_KEY, t); }
+function applyTheme(t) { document.body.classList.toggle('theme-light', t === 'light'); var btn = document.querySelector('.theme-toggle'); if (btn) btn.innerHTML = t === 'light' ? '&#9788;' : '&#9790;'; localStorage.setItem(App.THEME_KEY, t); }
 function toggleTheme() { applyTheme(getTheme() === 'dark' ? 'light' : 'dark'); }
 
 /* ── Config Build ── */
@@ -364,6 +395,7 @@ function buildConfig() {
     target_model: document.getElementById('target_model').value.trim() || 'deepseek-chat',
     template_name: tn,
     max_rounds: parseInt(document.getElementById('max_rounds').value) || 5,
+    target_concurrency: parseInt(document.getElementById('target_concurrency').value) || 10,
     cooldown_no_new: parseInt(document.getElementById('cooldown_no_new').value) || 2,
     allow_continuation: document.getElementById('allow_continuation').value === 'true',
     agent3_enabled: document.getElementById('agent3_enabled').value === 'true',
@@ -475,6 +507,7 @@ function startTest() {
       var data = d.data || d;
       if (data.error || d.error) { toast(data.error || d.error, 'error'); resetUI(); return; }
       App.taskId = data.task_id;
+      sessionStorage.setItem('lastTaskId', App.taskId);
       EventBus.connect(App.taskId);
       EventBus.startPolling(App.taskId);
     })
@@ -501,6 +534,43 @@ function finalize() {
 }
 function resetUI() { document.getElementById('btn-start').disabled = false; document.getElementById('btn-stop').style.display = 'none'; }
 
+function restoreLastTask() {
+  var lastId = sessionStorage.getItem('lastTaskId');
+  if (!lastId) {
+    fetch('/api/test/latest').then(function (r) { return r.json(); }).then(function (d) {
+      var data = d.data;
+      if (data && data.task_id) _restoreTask(data.task_id, data.finished);
+    }).catch(function () {});
+    return;
+  }
+  fetch('/api/test/' + lastId + '/status').then(function (r) { return r.json(); }).then(function (d) {
+    var data = d.data || d;
+    if (data && data.task_id) _restoreTask(data.task_id, data.finished);
+  }).catch(function () {});
+}
+
+function _restoreTask(taskId, finished) {
+  App.taskId = taskId;
+  sessionStorage.setItem('lastTaskId', taskId);
+  document.getElementById('progress-section').style.display = '';
+  if (!finished) {
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-stop').style.display = '';
+    App.elapsedStart = Date.now();
+    App.elapsedTimer = setInterval(function () { document.getElementById('live-elapsed').textContent = ((Date.now() - App.elapsedStart) / 1000).toFixed(1) + 's'; }, 100);
+    EventBus.connect(taskId);
+    EventBus.startPolling(taskId);
+  } else {
+    fetch('/api/test/' + taskId + '/report').then(function (r) { return r.json(); }).then(function (d) {
+      var report = d.data || d;
+      if (report && report.rounds) {
+        report.rounds.forEach(function (r) { renderRoundCard(r); });
+      }
+      document.getElementById('live-phase').textContent = '测试完成';
+    }).catch(function () {});
+  }
+}
+
 /* ── Render ── */
 function renderRoundCard(e) {
   var s = e.summary || {};
@@ -509,9 +579,13 @@ function renderRoundCard(e) {
   var ct = document.getElementById('rounds-container');
   var c = document.createElement('div'); c.className = 'round-card';
 
-  var headerHtml = '<div class="round-header"><span class="round-title">R' + e.round + ' <span style="color:var(--accent)">' + escHtml(ns.primaryConcept || '') + '</span> / <span style="color:var(--purple)">' + escHtml(ns.primaryMethod || '') + '</span></span><span class="round-stats"><span>发送 <span class="round-stat-val">' + (s.total || 0) + '</span></span><span class="stat-success">绕过 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span><span>' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
+  var headerHtml = '<div class="round-header"><span class="round-title">R' + e.round + ' <span style="color:var(--accent)">' + escHtml(toCn('concepts', ns.primaryConcept)) + '</span> / <span style="color:var(--purple)">' + escHtml(toCn('methods', ns.primaryMethod)) + '</span></span><span class="round-stats"><span>发送 <span class="round-stat-val">' + (s.total || 0) + '</span></span><span class="stat-success">绕过 <span class="round-stat-val">' + (s.bypassed || 0) + '</span></span><span class="stat-partial">部分 <span class="round-stat-val">' + (s.partial || 0) + '</span></span><span class="stat-blocked">拒绝 <span class="round-stat-val">' + (s.blocked || 0) + '</span></span><span>' + (s.bypassRate || '0%') + '</span><span class="chevron">&#9660;</span></span></div>';
 
-  var bodyHtml = '<div class="round-body"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">耗时 ' + (e.elapsed || '?') + 's | 新攻 ' + (s.newPrompts || 0) + ((s.contPrompts || 0) > 0 ? ' 续攻 ' + s.contPrompts : '') + ' | 存活 ' + (s.activeSessions || 0) + '</div>' + ds.map(renderDetailItem).join('') + (e.feedback ? '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border-primary);padding-top:8px">' + escHtml(e.feedback) + '</div>' : '') + '</div>';
+  var judgeWarnCount = ds.filter(function(d) { return d.judge_reason && (d.judge_reason.indexOf('解析失败') !== -1 || d.judge_reason.indexOf('调用异常') !== -1 || d.judge_reason.indexOf('无法判断') !== -1); }).length;
+  var judgeTotal = ds.filter(function(d) { return !!d.judge_reason; }).length;
+  var judgeInfo = judgeTotal > 0 ? ' | 裁判 ' + judgeTotal + '条' + (judgeWarnCount > 0 ? ' <span style="color:var(--warning)">(' + judgeWarnCount + '条异常)</span>' : ' <span style="color:var(--success)">(全部正常)</span>') : '';
+
+  var bodyHtml = '<div class="round-body"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">耗时 ' + (e.elapsed || '?') + 's | 新攻 ' + (s.newPrompts || 0) + ((s.contPrompts || 0) > 0 ? ' 续攻 ' + s.contPrompts : '') + ' | 存活 ' + (s.activeSessions || 0) + judgeInfo + '</div>' + ds.map(renderDetailItem).join('') + (e.feedback ? '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border-primary);padding-top:8px">' + escHtml(e.feedback) + '</div>' : '') + '</div>';
 
   c.innerHTML = headerHtml + bodyHtml;
   c.querySelector('.round-header').addEventListener('click', function () { var b = c.querySelector('.round-body'); var ch = c.querySelector('.chevron'); b.classList.toggle('open'); ch.classList.toggle('open'); });
@@ -530,7 +604,18 @@ function renderDetailItem(d) {
   var info = sm[d.jailbreakStatus] || sm['partial'];
   var typeTag = d.promptType === 'continue' ? '<span class="badge badge-continue">续攻·' + escHtml(d.sessionId || '') + '</span>' : '';
   var errorLine = d.error ? '<div class="result-text" style="margin-top:6px;color:#e74c3c"><span class="label-text">Error</span><br>' + escHtml(d.error) + '</div>' : '';
-  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(d.concept || '') + '</span><span>' + (d.latencyMs || 0) + 'ms</span>' + (d.judge_reason ? '<span title="' + escHtml(d.judge_reason) + '">裁判</span>' : '') + '</div><div class="result-text"><span class="label-text">Prompt</span><br>' + escLong(d.promptText || '', 300) + '</div><div class="result-text" style="margin-top:6px"><span class="label-text">Response</span><br>' + escLong(d.modelResponse || '', 400) + '</div>' + errorLine + '</div>';
+  var responseLine = d.modelResponse ? '<div class="result-text" style="margin-top:6px"><span class="label-text">Response</span><br>' + escLong(d.modelResponse, 400) + '</div>' : '';
+  var reasoningLine = d.reasoningText ? '<div class="result-text" style="margin-top:6px;opacity:0.7"><span class="label-text">Reasoning</span><br>' + escLong(d.reasoningText, 300) + '</div>' : '';
+  if (!d.modelResponse && !d.reasoningText) { responseLine = '<div class="result-text" style="margin-top:6px;color:var(--text-muted)"><span class="label-text">Response</span><br>[无响应内容]</div>'; }
+  var judgeBadge = '';
+  if (d.judge_reason) {
+    var jrText = d.judge_reason;
+    var jConf = d.judge_confidence ? ' (' + (d.judge_confidence * 100).toFixed(0) + '%)' : '';
+    var isWarn = jrText.indexOf('解析失败') !== -1 || jrText.indexOf('调用异常') !== -1 || jrText.indexOf('无法判断') !== -1;
+    var jStyle = isWarn ? 'background:var(--warning-dim);color:var(--warning)' : 'background:var(--purple-dim);color:var(--purple)';
+    judgeBadge = '<span class="badge" style="' + jStyle + '" title="' + escHtml(jrText) + '">裁判: ' + escHtml(jrText.length > 12 ? jrText.substring(0, 12) + '…' : jrText) + jConf + '</span>';
+  }
+  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(toCn('concepts', d.concept)) + '</span><span class="badge badge-method">' + escHtml(toCn('methods', d.method)) + '</span>' + (d.category ? '<span style="color:var(--text-secondary);font-size:11px">' + escHtml(toCn('categories', d.category)) + '</span>' : '') + '<span>' + (d.latencyMs || 0) + 'ms</span>' + judgeBadge + '</div><div class="result-text"><span class="label-text">Prompt</span><br>' + escLong(d.promptText || '', 300) + '</div>' + responseLine + reasoningLine + errorLine + '</div>';
 }
 
 function updateFinalSummary() {
@@ -545,19 +630,22 @@ function updateFinalSummary() {
   document.getElementById('sum-peak').textContent = br.toFixed(0) + '%';
   var mx = Math.max.apply(null, rates.concat([1]));
   document.getElementById('chart-bypass').innerHTML = rates.map(function (r, i) { return '<div class="bar-col"><div class="bar-fill" style="height:' + (r / mx * 100).toFixed(0) + '%"></div><div class="bar-label">R' + (i + 1) + '</div></div>'; }).join('');
-  document.getElementById('chart-covered').innerHTML = cv.size > 0 ? '<div class="kb-list">' + Array.from(cv).sort().map(function (c) { return '<span class="kb-tag">' + c + '</span>'; }).join('') + '</div>' : '暂无';
+  document.getElementById('chart-covered').innerHTML = cv.size > 0 ? '<div class="kb-list">' + Array.from(cv).sort().map(function (c) { return '<span class="kb-tag">' + escHtml(toCn('categories', c)) + '</span>'; }).join('') + '</div>' : '暂无';
 }
 
 /* ── Init ── */
 document.addEventListener('DOMContentLoaded', function () {
+  loadNameMaps();
   applyTheme(getTheme());
   document.querySelectorAll('.nav-tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
+      if (btn.tagName === 'A') return;
       document.querySelectorAll('.nav-tab').forEach(function (b) { b.classList.remove('active'); });
       document.querySelectorAll('.nav-panel').forEach(function (p) { p.style.display = 'none'; });
       btn.classList.add('active');
       var panel = document.getElementById(btn.dataset.nav);
       if (panel) panel.style.display = 'block';
+      if (btn.dataset.nav) history.replaceState(null, '', '#' + btn.dataset.nav.replace('nav-', ''));
       if (btn.dataset.nav === 'nav-sessions' && typeof Sessions !== 'undefined' && Sessions.load) Sessions.load();
       if (btn.dataset.nav === 'nav-kb' && typeof KB !== 'undefined') KB.switchKb('kb1');
     });
@@ -571,7 +659,8 @@ document.addEventListener('DOMContentLoaded', function () {
       document.getElementById(btn.dataset.tab).classList.add('active');
     });
   });
-  document.querySelector('.theme-toggle').addEventListener('click', toggleTheme);
+  var themeBtn = document.querySelector('.theme-toggle');
+  if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
   document.getElementById('btn-start').addEventListener('click', startTest);
   document.getElementById('btn-stop').addEventListener('click', stopTest);
   document.querySelector('[data-action="probe"]').addEventListener('click', probeTarget);
@@ -581,42 +670,50 @@ document.addEventListener('DOMContentLoaded', function () {
   if (compileBtn) compileBtn.addEventListener('click', compileScript);
   var confirmBtn = document.getElementById('btn-confirm-script');
   if (confirmBtn) confirmBtn.addEventListener('click', confirmScript);
-  document.getElementById('btn-load-claude-cfg').addEventListener('click', loadClaudeCfg);
-  document.getElementById('btn-save-claude-cfg').addEventListener('click', saveClaudeCfg);
+  document.getElementById('btn-load-gen-cfg').addEventListener('click', loadGeneratorCfg);
+  document.getElementById('btn-save-gen-cfg').addEventListener('click', saveGeneratorCfg);
   document.getElementById('btn-sync-aux').addEventListener('click', syncToAux);
-  loadClaudeCfg();
+  loadGeneratorCfg();
   if (document.getElementById('kb-add-btn')) document.getElementById('kb-add-btn').addEventListener('click', function () { if (typeof KB !== 'undefined') KB.addEntry(); });
+  restoreLastTask();
+  // Hash 路由：支持 /#kb /#sessions /#test 定位到对应 tab
+  var hashMap = { '#kb': 'nav-kb', '#sessions': 'nav-sessions', '#test': 'nav-test' };
+  var targetNav = hashMap[location.hash];
+  if (targetNav) {
+    var navBtn = document.querySelector('.nav-tab[data-nav="' + targetNav + '"]');
+    if (navBtn) navBtn.click();
+  }
 });
 
-function loadClaudeCfg() {
-  fetch('/api/claude-agent/config').then(function (r) { return r.json(); }).then(function (d) {
+function loadGeneratorCfg() {
+  fetch('/api/generator/config').then(function (r) { return r.json(); }).then(function (d) {
     var data = d.data || {};
     var status = data.status || {};
-    document.getElementById('claude_agent_url').value = data.url || '';
-    document.getElementById('claude_agent_key').value = data.key || '';
-    document.getElementById('claude_agent_model').value = data.model || '';
-    var st = document.getElementById('claude-cfg-status');
+    document.getElementById('generator_url').value = data.url || '';
+    document.getElementById('generator_key').value = data.key || '';
+    document.getElementById('generator_model').value = data.model || '';
+    var st = document.getElementById('gen-cfg-status');
     if (st) {
       st.textContent = status.message || '';
       st.style.color = status.ready ? 'var(--success)' : 'var(--warning)';
     }
   }).catch(function () { toast('加载提示词生成配置失败', 'error'); });
 }
-function saveClaudeCfg() {
-  var payload = { url: document.getElementById('claude_agent_url').value.trim(), key: document.getElementById('claude_agent_key').value.trim(), model: document.getElementById('claude_agent_model').value.trim() };
-  fetch('/api/claude-agent/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+function saveGeneratorCfg() {
+  var payload = { url: document.getElementById('generator_url').value.trim(), key: document.getElementById('generator_key').value.trim(), model: document.getElementById('generator_model').value.trim() };
+  fetch('/api/generator/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
-      var st = document.getElementById('claude-cfg-status');
+      var st = document.getElementById('gen-cfg-status');
       st.textContent = d.ok ? '已保存' : (d.error || '失败');
-      setTimeout(function () { loadClaudeCfg(); }, 100);
+      setTimeout(function () { loadGeneratorCfg(); }, 100);
     })
     .catch(function () { toast('保存配置失败', 'error'); });
 }
 function syncToAux() {
-  var url = document.getElementById('claude_agent_url').value.trim();
-  var key = document.getElementById('claude_agent_key').value.trim();
-  var model = document.getElementById('claude_agent_model').value.trim();
+  var url = document.getElementById('generator_url').value.trim();
+  var key = document.getElementById('generator_key').value.trim();
+  var model = document.getElementById('generator_model').value.trim();
   if (!url && !key) { toast('提示词生成配置为空，无法同步', 'error'); return; }
   url = url.replace(/\/anthropic\/?$/, '');
   document.getElementById('agent_api_url').value = url;
