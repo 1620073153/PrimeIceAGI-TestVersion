@@ -99,6 +99,7 @@ class LLMClient:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "enable_thinking": False,
         }
 
         last_error: Optional[Exception] = None
@@ -145,7 +146,12 @@ class LLMClient:
                 # 成功
                 self._limiter.report_success()
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                content = data["choices"][0]["message"].get("content")
+                if not content:
+                    content = data["choices"][0]["message"].get("reasoning_content", "")
+                if not content:
+                    raise ValueError("API 返回空结果: content 和 reasoning_content 均为空")
+                return content
 
             except requests.exceptions.Timeout:
                 self._limiter.report_error()

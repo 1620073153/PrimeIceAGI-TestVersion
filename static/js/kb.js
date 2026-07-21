@@ -297,6 +297,45 @@ var KB = {
       h += '<div class="form-group"><label>模板</label><textarea id="mf-template" style="min-height:60px">' + escHtml(data.template || '') + '</textarea></div>';
     } else if (KB.currentId === 'kb4') {
       h += '<div class="form-group"><label>条目 ID</label><input id="mf-key" value="' + escHtml(editKey || '') + '" placeholder="自动生成 (t01, t02...)" ' + (editKey ? 'readonly' : '') + '><span class="hint">留空则自动递增</span></div>';
+      var curCat = data.category || '';
+      h += '<div class="form-group"><label>目标子类</label><select id="mf-category"><option value="">不指定</option>';
+      h += '<optgroup label="A1 违反社会主义核心价值观">';
+      h += '<option value="A1-a"' + (curCat==='A1-a'?' selected':'') + '>A1-a 煽动颠覆国家政权</option>';
+      h += '<option value="A1-b"' + (curCat==='A1-b'?' selected':'') + '>A1-b 危害国家安全和利益</option>';
+      h += '<option value="A1-c"' + (curCat==='A1-c'?' selected':'') + '>A1-c 煽动分裂国家</option>';
+      h += '<option value="A1-d"' + (curCat==='A1-d'?' selected':'') + '>A1-d 宣扬恐怖主义</option>';
+      h += '<option value="A1-e"' + (curCat==='A1-e'?' selected':'') + '>A1-e 宣扬民族仇恨</option>';
+      h += '<option value="A1-f"' + (curCat==='A1-f'?' selected':'') + '>A1-f 宣扬暴力、淫秽色情</option>';
+      h += '<option value="A1-g"' + (curCat==='A1-g'?' selected':'') + '>A1-g 传播虚假有害信息</option>';
+      h += '<option value="A1-h"' + (curCat==='A1-h'?' selected':'') + '>A1-h 其他法律禁止内容</option>';
+      h += '</optgroup><optgroup label="A2 歧视性内容">';
+      h += '<option value="A2-a"' + (curCat==='A2-a'?' selected':'') + '>A2-a 民族歧视</option>';
+      h += '<option value="A2-b"' + (curCat==='A2-b'?' selected':'') + '>A2-b 信仰歧视</option>';
+      h += '<option value="A2-c"' + (curCat==='A2-c'?' selected':'') + '>A2-c 国别歧视</option>';
+      h += '<option value="A2-d"' + (curCat==='A2-d'?' selected':'') + '>A2-d 地域歧视</option>';
+      h += '<option value="A2-e"' + (curCat==='A2-e'?' selected':'') + '>A2-e 性别歧视</option>';
+      h += '<option value="A2-f"' + (curCat==='A2-f'?' selected':'') + '>A2-f 年龄歧视</option>';
+      h += '<option value="A2-g"' + (curCat==='A2-g'?' selected':'') + '>A2-g 职业歧视</option>';
+      h += '<option value="A2-h"' + (curCat==='A2-h'?' selected':'') + '>A2-h 健康歧视</option>';
+      h += '<option value="A2-i"' + (curCat==='A2-i'?' selected':'') + '>A2-i 其他歧视</option>';
+      h += '</optgroup><optgroup label="A3 商业违法违规">';
+      h += '<option value="A3-a"' + (curCat==='A3-a'?' selected':'') + '>A3-a 侵犯知识产权</option>';
+      h += '<option value="A3-b"' + (curCat==='A3-b'?' selected':'') + '>A3-b 违反商业道德</option>';
+      h += '<option value="A3-c"' + (curCat==='A3-c'?' selected':'') + '>A3-c 泄露商业秘密</option>';
+      h += '<option value="A3-d"' + (curCat==='A3-d'?' selected':'') + '>A3-d 垄断和不正当竞争</option>';
+      h += '<option value="A3-e"' + (curCat==='A3-e'?' selected':'') + '>A3-e 其他商业违规</option>';
+      h += '</optgroup><optgroup label="A4 侵犯他人合法权益">';
+      h += '<option value="A4-a"' + (curCat==='A4-a'?' selected':'') + '>A4-a 危害身心健康</option>';
+      h += '<option value="A4-b"' + (curCat==='A4-b'?' selected':'') + '>A4-b 侵害肖像权</option>';
+      h += '<option value="A4-c"' + (curCat==='A4-c'?' selected':'') + '>A4-c 侵害名誉权</option>';
+      h += '<option value="A4-d"' + (curCat==='A4-d'?' selected':'') + '>A4-d 侵害荣誉权</option>';
+      h += '<option value="A4-e"' + (curCat==='A4-e'?' selected':'') + '>A4-e 侵害隐私权</option>';
+      h += '<option value="A4-f"' + (curCat==='A4-f'?' selected':'') + '>A4-f 侵害个人信息权益</option>';
+      h += '<option value="A4-g"' + (curCat==='A4-g'?' selected':'') + '>A4-g 侵犯其他合法权益</option>';
+      h += '</optgroup><optgroup label="A5 无法满足特定服务安全需求">';
+      h += '<option value="A5-a"' + (curCat==='A5-a'?' selected':'') + '>A5-a 内容不准确</option>';
+      h += '<option value="A5-b"' + (curCat==='A5-b'?' selected':'') + '>A5-b 内容不可靠</option>';
+      h += '</optgroup></select><span class="hint">指定后该模板将计入对应子类的覆盖率</span></div>';
       h += '<div class="form-group"><label>模板内容</label><textarea id="mf-template_text" style="min-height:200px">' + escHtml(data.template_text || '') + '</textarea></div>';
       h += '<div class="form-group"><label>批量添加</label><textarea id="mf-batch" style="min-height:80px" placeholder="多条模板用 ===== 分隔，批量添加时忽略上方内容"></textarea><span class="hint">可选：粘贴多条模板，用 ===== 分隔</span></div>';
     }
@@ -373,6 +412,7 @@ var KB = {
       f.template = gv('mf-template');
     } else if (KB.currentId === 'kb4') {
       f.entry_id = gv('mf-key');
+      f.category = gv('mf-category');
       f.template_text = gv('mf-template_text');
       f.batch_text = gv('mf-batch');
     }

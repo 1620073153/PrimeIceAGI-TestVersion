@@ -65,6 +65,8 @@ def test_orchestrator_skips_single_empty_generation_round_then_recovers(monkeypa
         config={
             "target_api_url": "http://127.0.0.1/mock",
             "target_api_key": "test-key",
+            "agent_api_url": "http://127.0.0.1/mock-agent",
+            "agent_api_key": "test-agent-key",
             "max_rounds": 2,
             "cooldown_no_new": 2,
             "agent2_enabled": False,
@@ -118,6 +120,8 @@ def test_orchestrator_stops_after_two_empty_generation_rounds(monkeypatch):
         config={
             "target_api_url": "http://127.0.0.1/mock",
             "target_api_key": "test-key",
+            "agent_api_url": "http://127.0.0.1/mock-agent",
+            "agent_api_key": "test-agent-key",
             "max_rounds": 5,
             "cooldown_no_new": 2,
             "generation_failure_limit": 2,

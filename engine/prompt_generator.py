@@ -135,7 +135,7 @@ def _format_strategy_library(concept_key: str, method_key: str) -> str:
     concepts = kb2.get("concepts", {})
     methods = kb3.get("methods", {})
 
-    lines = ["\n## 攻击原理（优先使用以下原理，鼓励混合多个概念）"]
+    lines = ["\n## 攻击原理参考库（鼓励多样组合）"]
 
     priority_concepts = []
     other_concepts = []
@@ -149,13 +149,13 @@ def _format_strategy_library(concept_key: str, method_key: str) -> str:
             continue
 
     if priority_concepts:
-        lines.append(f"【优先使用 — 本轮推荐原理】")
+        lines.append(f"【本轮推荐原理】")
         lines.extend(priority_concepts)
     if other_concepts:
         lines.append(f"【可选参考 — 可自由组合】")
         lines.extend(other_concepts)
 
-    lines.append("\n## 包装手法（优先使用以下手法，鼓励混合多种包装）")
+    lines.append("\n## 包装手法参考库（鼓励多样组合）")
 
     priority_methods = []
     other_methods = []
@@ -169,7 +169,7 @@ def _format_strategy_library(concept_key: str, method_key: str) -> str:
             continue
 
     if priority_methods:
-        lines.append(f"【优先使用 — 本轮推荐手法】")
+        lines.append(f"【本轮推荐手法】")
         lines.extend(priority_methods)
     if other_methods:
         lines.append(f"【可选参考 — 可自由组合】")
@@ -210,7 +210,7 @@ def _build_prompt_skill_message(
     else:
         parts = [f"生成{batch_size}条测试提示词。"]
         if subcategories:
-            parts.append(f"目标子类: {', '.join(subcategories[:8])}")
+            parts.append(f"目标子类: {', '.join(subcategories[:batch_size])}")
 
     # 动态注入策略库
     parts.append(_format_strategy_library(concept, method))
@@ -336,26 +336,21 @@ def generate_prompts(
             subs = strategy.get("subcategories", _first_subcategory())
             p["target_category"] = subs[i % len(subs)] if subs else "A1-a"
 
-        # ── 补充 concept 和 method 标注 ──
+        # ── 补充 concept 和 method 标注（列表化） ──
+        tags = p.get("strategy_tags", [])
         if "concept" not in p or not p["concept"]:
-            tags = p.get("strategy_tags", [])
-            # 尝试从 strategy_tags 匹配已知 concept（key 为中文）
-            matched_concept = ""
-            for tag in tags:
-                if tag in _known_concepts:
-                    matched_concept = tag
-                    break
-            p["concept"] = matched_concept or concept_pool[i % len(concept_pool)]
+            matched_concepts = [tag for tag in tags if tag in _known_concepts]
+            p["concepts"] = matched_concepts or [concept_pool[i % len(concept_pool)]]
+            p["concept"] = p["concepts"][0]
+        else:
+            p["concepts"] = [p["concept"]]
 
         if "method" not in p or not p["method"]:
-            tags = p.get("strategy_tags", [])
-            # 尝试从 strategy_tags 匹配已知 method（key 为中文）
-            matched_method = ""
-            for tag in tags:
-                if tag in _known_methods:
-                    matched_method = tag
-                    break
-            p["method"] = matched_method or method_pool[i % len(method_pool)]
+            matched_methods = [tag for tag in tags if tag in _known_methods]
+            p["methods"] = matched_methods or [method_pool[i % len(method_pool)]]
+            p["method"] = p["methods"][0]
+        else:
+            p["methods"] = [p["method"]]
 
     logger.info(f"[Generator] 成功生成 {len(prompts[:batch_size])} 条提示词")
     return prompts[:batch_size]

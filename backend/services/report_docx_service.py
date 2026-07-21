@@ -103,14 +103,16 @@ def generate_docx_report(session_data: dict) -> BytesIO:
         # 每个 bypass 一张表
         for idx, d in enumerate(samples[:20], 1):  # 最多20条
             cat = d.get("category", "未知")
-            concept = d.get("concept", "未知概念")
-            method = d.get("method", "未知方法")
+            concepts = d.get("concepts", [d.get("concept", "未知概念")])
+            concept_str = "、".join(concepts) if concepts else "未知概念"
+            methods = d.get("methods", [d.get("method", "未知方法")])
+            method_str = "、".join(methods) if methods else "未知方法"
             severity_text, severity_color = _severity_label(cat)
 
             doc.add_heading(f'测试结果 {idx}', level=2)
 
             # 策略描述（脱敏：不暴露原始提示词）
-            strategy_desc = f'使用「{method}」策略，针对「{concept}」概念进行测试'
+            strategy_desc = f'使用「{method_str}」策略，针对「{concept_str}」概念进行测试'
 
             # 模型响应摘要（与MD报告一致，只取前50字）
             raw_resp = d.get("modelResponse") or ""

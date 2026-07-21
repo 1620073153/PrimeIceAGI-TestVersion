@@ -630,8 +630,10 @@ function renderRoundCard(e) {
   var contCount = ds.length - newDs.length;
   var conceptCounts = {}, methodCounts = {};
   newDs.forEach(function(d) {
-    if (d.concept) conceptCounts[d.concept] = (conceptCounts[d.concept] || 0) + 1;
-    if (d.method) methodCounts[d.method] = (methodCounts[d.method] || 0) + 1;
+    var cs = d.concepts || (d.concept ? [d.concept] : []);
+    cs.forEach(function(c) { if (c) conceptCounts[c] = (conceptCounts[c] || 0) + 1; });
+    var ms = d.methods || (d.method ? [d.method] : []);
+    ms.forEach(function(m) { if (m) methodCounts[m] = (methodCounts[m] || 0) + 1; });
   });
   var conceptKeys = Object.keys(conceptCounts).sort(function(a,b){ return conceptCounts[b]-conceptCounts[a]; });
   var methodKeys = Object.keys(methodCounts).sort(function(a,b){ return methodCounts[b]-methodCounts[a]; });
@@ -704,7 +706,9 @@ function renderDetailItem(d) {
     }).join('');
     historyHtml = '<div class="result-text" style="margin-top:6px;margin-bottom:6px"><button class="btn btn-xs btn-ghost" onclick="var el=document.getElementById(\'' + histId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\';this.textContent=el.style.display===\'none\'?\'对话历史 (' + totalMsgs + '条) &#9654;\':\'对话历史 (' + totalMsgs + '条) &#9660;\'">对话历史 (' + totalMsgs + '条) &#9654;</button><div id="' + histId + '" style="display:none;margin-top:4px;padding:6px;border:1px solid var(--border-primary);border-radius:4px;background:var(--bg-secondary)">' + msgsHtml + '</div></div>';
   }
-  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + '<span class="badge badge-concept">' + escHtml(toCn('concepts', d.concept)) + '</span><span class="badge badge-method">' + escHtml(toCn('methods', d.method)) + '</span>' + (d.category ? '<span style="color:var(--text-secondary);font-size:11px">' + escHtml(toCn('categories', d.category)) + '</span>' : '') + '<span>' + (d.latencyMs || 0) + 'ms</span>' + judgeBadge + '</div>' + historyHtml + '<div class="result-text"><span class="label-text">提示词</span><br>' + escLong(d.promptText || '', 300) + '</div>' + responseLine + reasoningLine + errorLine + '</div>';
+  var conceptBadges = (d.concepts || (d.concept ? [d.concept] : [])).map(function(c) { return '<span class="badge badge-concept">' + escHtml(toCn('concepts', c)) + '</span>'; }).join('');
+  var methodBadges = (d.methods || (d.method ? [d.method] : [])).map(function(m) { return '<span class="badge badge-method">' + escHtml(toCn('methods', m)) + '</span>'; }).join('');
+  return '<div class="result-item ' + info.cls + '"><div class="result-meta"><span class="badge ' + info.badge + '">' + info.text + '</span>' + typeTag + conceptBadges + methodBadges + (d.category ? '<span style="color:var(--text-secondary);font-size:11px">' + escHtml(toCn('categories', d.category)) + '</span>' : '') + '<span>' + (d.latencyMs || 0) + 'ms</span>' + judgeBadge + '</div>' + historyHtml + '<div class="result-text"><span class="label-text">提示词</span><br>' + escLong(d.promptText || '', 300) + '</div>' + responseLine + reasoningLine + errorLine + '</div>';
 }
 
 function updateFinalSummary() {

@@ -256,7 +256,8 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
                          successful_prompts: list[dict] | None = None,
                          total_slots: int = 10,
                          consecutive_zero_rounds: int = 0,
-                         disabled_categories: set = None) -> dict:
+                         disabled_categories: set = None,
+                         attempted_categories: set = None) -> dict:
     """
     决策下一轮策略
 
@@ -268,6 +269,7 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
     - successful_prompts: 本轮成功的提示词列表
     - total_slots: 需要的子类总数（= effective_concurrency）
     - disabled_categories: 用户禁用的子类集合
+    - attempted_categories: 已尝试过的子类集合
 
     输出:
     - 下一轮策略 dict，含 subcategories / concept_pool / method_pool
@@ -346,7 +348,11 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
     # 过滤用户禁用的子类
     if disabled_categories:
         all_subs = [s for s in all_subs if s not in disabled_categories]
-    uncovered = [s for s in all_subs if s not in covered_categories]
+    excluded = set(covered_categories or []) | set(attempted_categories or [])
+    uncovered = [s for s in all_subs if s not in excluded]
+    # 如果全部尝试过，允许重试失败的子类（排除已覆盖的）
+    if not uncovered:
+        uncovered = [s for s in all_subs if s not in set(covered_categories or [])]
 
     concepts = list(_load_concepts().keys())
     methods = list(_load_methods().keys())
@@ -418,8 +424,18 @@ def decide_next_strategy(stats: dict, current_strategy: dict,
         next_strategy["fresh_subcategories"] = fresh_selected
         next_strategy["focus_cluster"] = effective_cluster
         next_strategy["primary_cluster"] = effective_cluster
-        next_strategy["primary_method"] = current_method
-        next_strategy["primary_concept"] = current_concept
+        # explore/exploit 平衡：70%保持当前成功策略，30%从pool轮转
+        if random.random() < 0.7 or len(concept_pool) <= 1:
+            next_strategy["primary_concept"] = current_concept
+        else:
+            alternatives = [c for c in concept_pool if c != current_concept]
+            next_strategy["primary_concept"] = random.choice(alternatives) if alternatives else current_concept
+
+        if random.random() < 0.7 or len(method_pool) <= 1:
+            next_strategy["primary_method"] = current_method
+        else:
+            alternatives = [m for m in method_pool if m != current_method]
+            next_strategy["primary_method"] = random.choice(alternatives) if alternatives else current_method
         return next_strategy
 
     # 情况 2: 有明确信号 → 根据信号映射策略（50% 随机因子）

@@ -360,14 +360,16 @@ def _section_bypass_samples(lines: list, rounds: list):
 
     for idx, d in enumerate(selected, 1):
         cat = d.get("category", "未知")
-        concept = d.get("concept", "未知概念")
-        method = d.get("method", "未知方法")
+        concepts = d.get("concepts", [d.get("concept", "未知概念")])
+        concept_str = "、".join(concepts) if concepts else "未知概念"
+        methods = d.get("methods", [d.get("method", "未知方法")])
+        method_str = "、".join(methods) if methods else "未知方法"
         prefix = cat.split("-")[0] if "-" in cat else ""
         cluster_name = _cluster_cn(prefix) if prefix else "其他"
         severity = _severity_for_category(cat)
 
         # 策略描述（脱敏：只展示方法名，不展示原始提示词）
-        strategy_desc = f"使用「{method}」策略，针对「{concept}」概念进行测试"
+        strategy_desc = f"使用「{method_str}」策略，针对「{concept_str}」概念进行测试"
 
         # 模型响应脱敏：只取前50字
         raw_resp = d.get("modelResponse") or ""

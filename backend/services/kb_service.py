@@ -129,6 +129,7 @@ def create_entry(kb_id: str, new_entry: dict) -> None:
             # 只保留 template_text + 时间戳
             templates[entry_id] = {
                 "template_text": new_entry.get("template_text", ""),
+                "category": new_entry.get("category", ""),
                 "created_at": new_entry.get("created_at"),
                 "updated_at": new_entry.get("updated_at"),
             }
@@ -160,8 +161,8 @@ def update_entry(kb_id: str, entry_key: str, updates: dict) -> None:
         if entry_key not in container:
             raise ValidationError(f"条目 {entry_key} 不存在")
         if kb_id == "kb4":
-            # KB4 简化：只更新 template_text
             container[entry_key]["template_text"] = updates.get("template_text", container[entry_key].get("template_text", ""))
+            container[entry_key]["category"] = updates.get("category", container[entry_key].get("category", ""))
             container[entry_key]["updated_at"] = time.time()
         else:
             container[entry_key].update({k: v for k, v in updates.items() if k not in ("key", "entry_id")})
