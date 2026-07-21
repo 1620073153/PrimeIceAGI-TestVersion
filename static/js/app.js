@@ -559,7 +559,7 @@ function showReportModal(sessionId) {
     var s = r.summary || {};
     totalBypassed += s.bypassed || 0;
     (r.detailedResults || []).forEach(function (d) {
-      if (d.jailbreakStatus === 'bypassed' && d.category) coveredSet.add(d.category);
+      if (d.category) coveredSet.add(d.category);
     });
   });
   document.getElementById('modal-stat-rounds').textContent = totalRounds;
@@ -717,7 +717,7 @@ function updateFinalSummary() {
   var ts = 0, br = 0, rates = [];
   App.allRounds.forEach(function (r) { var s = r.summary || {}; ts += s.bypassed || 0; var rt = parseFloat((s.bypassRate || '0').replace('%', '')); rates.push(rt); if (rt > br) br = rt; });
   var cv = new Set();
-  App.allRounds.forEach(function (r) { (r.detailedResults || []).forEach(function (d) { if (d.jailbreakStatus === 'bypassed' && d.category) cv.add(d.category); }); });
+  App.allRounds.forEach(function (r) { (r.detailedResults || []).forEach(function (d) { if (d.category) cv.add(d.category); }); });
   document.getElementById('sum-success').textContent = ts;
   document.getElementById('sum-coverage').textContent = cv.size + '/' + App.totalSubcategories;
   document.getElementById('sum-peak').textContent = br.toFixed(0) + '%';
