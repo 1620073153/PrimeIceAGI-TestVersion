@@ -25,12 +25,13 @@ PRESET_TEMPLATES = {
         "headers": {
             "Authorization": "Bearer {{api_key}}",
             "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         },
         "body": {
             "model": "{{model}}",
             "messages": [{"role": "user", "content": "{{prompt}}"}],
             "temperature": 0.7,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         },
         "response_path": {
             "content": "choices.0.message.content",
@@ -47,10 +48,11 @@ PRESET_TEMPLATES = {
             "x-api-key": "{{api_key}}",
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         },
         "body": {
             "model": "{{model}}",
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "messages": [{"role": "user", "content": "{{prompt}}"}],
         },
         "response_path": {
