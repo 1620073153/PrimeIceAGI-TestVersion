@@ -25,7 +25,7 @@ def test_batch_js_contains_dataset_extension_validation_and_history_loading():
     assert "limit=20" in script
 
 
-def test_app_js_surfaces_project_local_claude_status():
+def test_app_js_surfaces_generator_status():
     script = (PROJECT_ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
 
     assert "var status = data.status || {};" in script

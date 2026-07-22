@@ -1,5 +1,13 @@
 # PrimeIceAGI 变更记录
 
+## v0.5.9 (2026-07-22)
+
+- **fix**: 清理全项目残留 "Claude Code" 字眼（8文件17处）
+  - `orchestrator.py`: "Claude Code 智能体失败" → "提示词生成器失败"
+  - `prompt_generator.py`: 函数名/注释/兼容别名清理
+  - `test_api_routes.py`: 类名/方法名/路由路径/mock消息同步更新
+  - `.gitignore`、`DEV_GUIDE.md`、`test_batch_page_assets.py`: 注释清理
+
 ## v0.5.8 (2026-07-22)
 
 - **fix**: 补提交批量评估模块完整代码（原 v0.5.0/v0.5.1 遗漏，未入 git）

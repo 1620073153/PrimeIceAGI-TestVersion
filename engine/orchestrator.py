@@ -771,7 +771,7 @@ class RedTeamOrchestrator:
                     logger.warning(f"[Orchestrator] 续攻补位失败(非致命): {backfill_err}")
 
         except Exception as e:
-            logger.error(f"Claude Code 智能体失败: {e}")
+            logger.error(f"提示词生成器失败: {e}")
             self.event_callback({"event": "error", "round": self.current_round, "message": f"提示词生成失败: {str(e)[:200]}"})
 
         return new_prompts, cont_prompts

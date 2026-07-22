@@ -253,7 +253,7 @@ engine/orchestrator.py:_call_target_batch
 | `data/kb_store.py` | KB1-KB5 JSON 读写 |
 | `backend/routes/` | FastAPI 路由（health, task, config, sse） |
 | `backend/services/test_service.py` | 测试任务启动/停止服务 |
-| `config/agent_home/` | 旧 Claude CLI 配置（仅健康检查兼容层使用） |
+| `config/agent_home/` | 旧 CLI 配置（仅健康检查兼容层使用） |
 
 ---
 

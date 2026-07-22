@@ -48,16 +48,16 @@ AGENT_HOME = os.path.join(
 )
 
 
-def _agent_claude_dir() -> Path:
+def _agent_config_dir() -> Path:
     return Path(AGENT_HOME) / ".claude"
 
 
 def _agent_settings_path() -> Path:
-    return _agent_claude_dir() / "settings.json"
+    return _agent_config_dir() / "settings.json"
 
 
 def _prompt_skill_path() -> Path:
-    return _agent_claude_dir() / "skills" / "prompt-skill" / "SKILL.md"
+    return _agent_config_dir() / "skills" / "prompt-skill" / "SKILL.md"
 
 
 def _validate_agent_settings_file(settings_path: Path) -> tuple[bool, str]:
@@ -113,8 +113,6 @@ def get_generator_status() -> dict:
     }
 
 
-get_project_local_claude_status = get_generator_status
-
 
 def validate_generator_ready(config: dict) -> dict:
     status = get_generator_status()
@@ -123,9 +121,6 @@ def validate_generator_ready(config: dict) -> dict:
     if not status.get("settings_valid", False):
         return {"ok": False, "message": status["message"]}
     return {"ok": True, "message": "ok"}
-
-
-validate_claude_ready_for_start = validate_generator_ready
 
 
 def _format_strategy_library(concept_key: str, method_key: str) -> str:
@@ -260,7 +255,7 @@ def _build_prompt_skill_message(
 
 
 def kill_active():
-    """兼容接口 — 旧版用于终止 claude -p 子进程，直接 API 模式下为空操作。"""
+    """兼容接口 — 旧版用于终止生成子进程，直接 API 模式下为空操作。"""
     pass
 
 

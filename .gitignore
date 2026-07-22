@@ -21,7 +21,7 @@ venv/
 Thumbs.db
 .DS_Store
 
-# Claude Code 用户本地配置（根目录）
+# 用户本地 Agent 配置（根目录）
 /.claude/
 
 # agent_home: 忽略运行时产生的文件（含密钥）
