@@ -1,5 +1,73 @@
 # PrimeIceAGI 变更记录
 
+## v0.5.7 (2026-07-22)
+
+- **fix**: LLMClient 添加 Chrome User-Agent，修复企业 WAF（nginx）403 导致提示词生成器和裁判调用失败的问题
+
+## v0.5.1 (2026-07-20) — DOCX报告新版式
+
+### 变更
+
+- **重写** `backend/services/report_docx_service.py`：集成 demo 报告排版逻辑
+  - 封面页（独立section无页眉页脚）+ Logo占位 + 装饰线 + 信息表
+  - 分发与版本页、TOC目录页（可点击跳转）
+  - 6个正文章节：执行摘要、测试概述与范围、测试数据总览、典型绕过案例、安全维度覆盖分析、评估结论与建议
+  - 免责声明 + 附录A(风险等级评定标准) + 附录B(术语表)
+  - 全文仿宋_GB2312、深蓝表头白字、交替行着色、外粗内细边框
+  - 正文section页眉（左"机密"右"PrimeIceAGI安全评估报告"）、页脚（PAGE/NUMPAGES）
+  - 数据从 session_data 真实字段读取，容错处理缺失字段
+  - 函数签名 `generate_docx_report(session_data: dict) -> BytesIO` 不变，调用方无需修改
+  - 子类别中文名从 `data/tc260_standards.py` 动态读取
+
+## v0.5.0 (2026-07-19) — 批量评估模块整合
+
+### 来源
+
+从独立调试模块 `F:\PrimeIceAGI-BatchEval` 整合回主项目。
+
+### 新增功能
+
+- 批量评估 XLSX 报告新增 3 个 sheet：results（全量明细）、review（待复核）、failures（漏报定位）
+- 报告明细含子类型、绕过手法、模型回复（截断500字）、裁判理由
+- "导出当前报告"功能 — 运行中/停止后随时下载
+- 结果概览 8 项指标 tooltip 解释（纯 CSS hover）
+- 配置卡片部分折叠（高级配置区可收起）
+- "继续执行"按钮置于主操作栏
+- 实时结果显示类别名称而非编号
+
+### 修复
+
+- P0: 断点续跑 key 格式不匹配（`case_id` → `case_id__r{N}`）导致 resume 失效
+- P0: 续跑后结果概览停留旧值不更新（旧 report 覆盖实时 progress）
+- P1: 空响应武断判为"拦截" → 改为重试 + UNCERTAIN + 待复核
+- P1: 裁判 JSON 解析失败率高 → 多级容错（fence 清洗、数字引号修复、贪婪匹配、正则 fallback、重试）
+- P1: 终止任务延迟 10s → 2s（as_completed timeout 降低）
+- P1: 终止按钮无反馈 → 点击即 disable + "正在停止..."
+- P2: reason 为空显示"-" → 按判定类型补默认文本
+- P2: 重复折叠事件处理器导致 toggle 失效
+
+### 文件变更清单
+
+**覆盖（从 BatchEval 同步）：**
+engine/batch_models.py, engine/batch_evaluator.py, engine/batch_statistics.py,
+engine/report_exporter.py, engine/intercept_classifier.py, engine/response_judge.py,
+data/batch_progress_store.py, data/dataset_loader.py,
+backend/services/batch_eval_service.py, backend/routes/batch_eval.py,
+templates/batch.html, static/js/batch.js
+
+**合并：**
+backend/task_manager.py — 新增 reset_task 中 `task["report"] = None`
+static/css/main.css — 追加 .card-subsection-*, .tooltip-icon 样式
+
+### 审计结论
+
+- Blueprint 路由无冲突（/api/batch-eval/ 独立前缀）
+- TaskManager 共用单例，字段兼容
+- EventBus channel 以 task_id 隔离，无命名空间冲突
+- 测试中心功能不受影响
+
+---
+
 ## v0.4.7-beta (2026-07-14) — TC260-003 标准迁移 + 全链路解耦
 
 ### Breaking Changes
