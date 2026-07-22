@@ -467,3 +467,80 @@ header h1{font-size:18px;font-weight:600;color:var(--text-primary)}
   .track-lane{grid-template-columns:60px 1fr 60px}
   .track-status{display:none}
 }
+
+/* ── Batch Progress Bar ── */
+.batch-progressbar-wrap{padding:0 4px}
+.batch-progressbar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.batch-progressbar{
+  height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;
+  border:1px solid var(--border);
+}
+.batch-progressbar-fill{
+  height:100%;background:var(--accent);border-radius:4px;
+  transition:width .4s ease;
+}
+.batch-progressbar-footer{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+
+/* ── Batch Category Table ── */
+.batch-category-table-wrap{max-height:200px;overflow-y:auto}
+.batch-category-table-wrap::-webkit-scrollbar{width:4px}
+.batch-category-table-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.batch-category-table{
+  width:100%;border-collapse:collapse;font-size:12px;
+}
+.batch-category-table th{
+  text-align:left;padding:6px 10px;font-weight:500;color:var(--text-muted);
+  border-bottom:1px solid var(--border);font-size:11px;
+  position:sticky;top:0;background:var(--bg-input);
+}
+.batch-category-table td{
+  padding:5px 10px;border-bottom:1px solid var(--border);color:var(--text-secondary);
+}
+.batch-category-table tr:last-child td{border-bottom:none}
+.batch-category-table .cat-rate{font-weight:600;font-family:var(--font-mono)}
+.batch-category-table .cat-rate-high{color:var(--success)}
+.batch-category-table .cat-rate-mid{color:var(--warning)}
+.batch-category-table .cat-rate-low{color:var(--danger)}
+
+/* ── Batch Realtime Stream ── */
+.batch-realtime-stream{
+  max-height:240px;overflow-y:auto;
+  font-family:var(--font-mono);font-size:12px;line-height:1.6;
+}
+.batch-realtime-stream::-webkit-scrollbar{width:4px}
+.batch-realtime-stream::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.realtime-row{
+  display:grid;grid-template-columns:minmax(80px,1fr) 80px 90px minmax(60px,2fr) 60px;
+  gap:8px;padding:4px 8px;border-bottom:1px solid var(--border);
+  align-items:center;animation:fadeIn .2s ease;
+}
+.realtime-row:last-child{border-bottom:none}
+.realtime-caseid{color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.realtime-category{color:var(--purple);font-weight:500}
+.realtime-result{font-weight:500}
+.realtime-result.blocked{color:var(--success)}
+.realtime-result.not-blocked{color:var(--danger)}
+.realtime-result.review{color:var(--warning)}
+.realtime-reason{color:var(--text-secondary);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.realtime-time{color:var(--text-muted);text-align:right}
+
+/* ── Signature rows ── */
+.signature-row{display:flex;gap:8px;align-items:center}
+.signature-row .form-group{margin-bottom:0}
+.signature-row select,.signature-row input{font-size:13px}
+.btn-remove-sig{font-size:18px;line-height:1;padding:4px 8px;color:var(--text-muted)}
+.btn-remove-sig:hover{color:var(--danger,#dc2626)}
+
+/* ── Collapsible Cards ── */
+.collapse-icon{font-size:10px;margin-left:8px;color:var(--text-muted)}
+.card-title[data-collapsible]{cursor:pointer;user-select:none}
+
+/* ── Advanced Config Subsection ── */
+.card-subsection-title{font-size:13px;font-weight:500;color:var(--text-secondary);padding:8px 0;cursor:pointer;user-select:none}
+.card-subsection-title:hover{color:var(--text-primary)}
+.card-subsection-body{padding-bottom:4px}
+
+/* ── Tooltip Icon ── */
+.tooltip-icon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:var(--border);color:var(--text-muted);font-size:10px;font-weight:600;cursor:help;position:relative;vertical-align:middle;margin-left:4px}
+.tooltip-icon::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;font-weight:400;white-space:normal;width:max-content;max-width:280px;text-align:left;line-height:1.4;pointer-events:none;opacity:0;transition:opacity .15s;z-index:100}
+.tooltip-icon:hover::after{opacity:1}

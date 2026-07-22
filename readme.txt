@@ -11,7 +11,7 @@ PrimeIceAGI — 大模型内容安全红队自动化测试平台
 - Python 3.10+
 - 操作系统: Windows / Linux / macOS
 - Python 依赖: 见 requirements.txt（当前至少包含 flask、requests、openpyxl）
-- Windows 一键启动额外要求: Node.js 18+、npm、Claude Code CLI
+- Windows 一键启动额外要求: Node.js 18+、npm
 
 
 二、安装与启动
@@ -25,7 +25,7 @@ PrimeIceAGI — 大模型内容安全红队自动化测试平台
 
    双击 start.bat
 
-   脚本会自动检查 Python 3.10+、创建 .venv、安装 requirements.txt，并校验 Node.js / npm / Claude Code CLI。
+   脚本会自动检查 Python 3.10+、创建 .venv、安装 requirements.txt，并校验 Node.js / npm。
 
 3. 手动启动服务:
 

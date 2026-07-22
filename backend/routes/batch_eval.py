@@ -1,6 +1,7 @@
 """Batch evaluation routes — thin layer delegating to batch_eval_service."""
 
 import json
+from pathlib import Path
 from flask import Blueprint, Response, request, send_file
 
 from backend.response import ok, err
@@ -60,6 +61,16 @@ def stop_batch_eval(task_id: str):
     return ok({"status": "stopped"})
 
 
+@batch_eval_bp.route("/api/batch-eval/<task_id>/resume", methods=["POST"])
+def resume_batch_eval(task_id: str):
+    try:
+        credentials = request.get_json(force=True) or {}
+        result_task_id = batch_eval_service.resume_batch_eval(task_id, credentials)
+        return ok({"task_id": result_task_id})
+    except ValueError as exc:
+        return err(str(exc), 400)
+
+
 @batch_eval_bp.route("/api/batch-eval/<task_id>/report")
 def get_report(task_id: str):
     report = batch_eval_service.get_report(task_id)
@@ -68,6 +79,17 @@ def get_report(task_id: str):
     if "error" in report:
         return err(report["error"], 400)
     return ok(report)
+
+
+@batch_eval_bp.route("/api/batch-eval/<task_id>/export-current", methods=["POST"])
+def export_current_report(task_id: str):
+    try:
+        result = batch_eval_service.export_current_report(task_id)
+        if result is None:
+            return err("任务不存在或无已完成结果", 404)
+        return ok(result)
+    except ValueError as exc:
+        return err(str(exc), 400)
 
 
 @batch_eval_bp.route("/api/batch-eval/<task_id>/download/<filename>")

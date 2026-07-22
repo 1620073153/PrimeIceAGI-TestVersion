@@ -91,6 +91,21 @@ class TaskManager:
         self._persist(task_id)
         return True
 
+    def reset_task(self, task_id: str) -> bool:
+        """重置已完成的任务，使其可以重新运行（用于断点续跑）"""
+        with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return False
+            if not task.get("finished"):
+                return False  # 只能重置已完成/中断的任务
+            task["finished"] = False
+            task["stopped"] = False
+            task["orchestrator"] = None
+            task["report"] = None
+        self._persist(task_id)
+        return True
+
     def list_tasks(self) -> list[dict]:
         """列出所有任务（不含 orchestrator 对象和 config 敏感字段）"""
         result = []

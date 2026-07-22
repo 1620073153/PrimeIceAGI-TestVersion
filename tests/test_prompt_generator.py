@@ -1,4 +1,4 @@
-"""Claude Agent 模块测试 — 验证消息构造和解析逻辑"""
+"""提示词生成模块测试 — 验证消息构造和解析逻辑"""
 
 from engine.prompt_generator import (
     _build_prompt_skill_message,

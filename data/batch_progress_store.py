@@ -86,20 +86,23 @@ class BatchProgressStore:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
         progress = self.load_progress()
-        if result.case_id not in progress["completed_case_ids"]:
-            progress["completed_case_ids"].append(result.case_id)
+        task_key = f"{result.case_id}__r{result.repeat_index}"
+        if task_key not in progress["completed_case_ids"]:
+            progress["completed_case_ids"].append(task_key)
         progress["result_count"] += 1
-        if not result.success:
+        if result.error:
             progress["failed_count"] += 1
         if result.review_required:
             progress["review_required_count"] += 1
+        progress["current_case_id"] = result.case_id
         progress["last_result"] = {
             "case_id": result.case_id,
             "category": result.category,
+            "category_name": result.category_name,
             "intercept_type": result.intercept_type.value,
-            "judge_reason": result.judge_reason,
+            "reason": result.reason,
             "review_required": result.review_required,
-            "success": result.success,
+            "is_correct": result.is_correct,
         }
         progress["updated_at"] = self._timestamp()
         self._save_progress(progress)

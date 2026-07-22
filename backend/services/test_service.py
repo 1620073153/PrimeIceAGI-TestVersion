@@ -25,6 +25,7 @@ def start_test(config: dict) -> str:
     preflight = validate_generator_ready(config)
     if not preflight["ok"]:
         raise ValidationError(preflight["message"])
+    config["task_type"] = "test"
     task_id = _tm.create_task(config)
     thread = threading.Thread(target=_run, args=(task_id,), daemon=True)
     thread.start()
@@ -68,8 +69,20 @@ def get_latest_task() -> dict | None:
     tasks = _tm.list_tasks()
     if not tasks:
         return None
-    tasks.sort(key=lambda t: t.get("created_at") or 0, reverse=True)
-    return tasks[0]
+    # 过滤：只返回测试中心的任务（兼容旧任务：无 task_type 且无 batch_eval 标记）
+    filtered = []
+    for t in tasks:
+        full = _tm.get_task(t.get("task_id", ""))
+        if not full:
+            continue
+        cfg = full.get("config", {})
+        task_type = cfg.get("task_type")
+        if task_type == "test" or (task_type is None and not cfg.get("black_dataset_paths")):
+            filtered.append(t)
+    if not filtered:
+        return None
+    filtered.sort(key=lambda t: t.get("created_at") or 0, reverse=True)
+    return filtered[0]
 
 
 def _run(task_id: str):

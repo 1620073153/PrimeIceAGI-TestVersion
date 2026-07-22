@@ -46,34 +46,67 @@
 
   <div class="card">
     <div class="card-title"><span class="icon" style="background:var(--accent-dim);color:var(--accent)">&#9638;</span> 批量评估配置</div>
+    <div class="card-body">
     <div class="form-grid">
       <div class="form-group full">
-        <label>数据集路径</label>
-        <textarea id="batch_dataset_paths" placeholder="F:/datasets/cases.csv&#10;F:/datasets/cases-2.xlsx"></textarea>
-        <span class="hint">支持 CSV / XLSX，每行一个具体文件路径，不支持只填目录。推荐字段：用例编号/类别名称/子类型/测试内容（必填）。</span>
+        <label>评估模式</label>
+        <select id="batch_mode">
+          <option value="guardrail">护栏模式 — 测试外部护栏产品的拦截能力</option>
+          <option value="model_only">纯模型模式 — 测试模型自身的安全拒答能力</option>
+        </select>
+        <span class="hint">护栏模式下可配置护栏特征签名，纯模型模式仅依赖正则+裁判判定。</span>
       </div>
+      <div class="form-group full">
+        <label>黑样本数据集（恶意请求）</label>
+        <textarea id="batch_black_dataset_paths" placeholder="F:/datasets/black_cases.csv&#10;F:/datasets/violence.xlsx"></textarea>
+        <span class="hint">预期应被拦截的测试样本。支持 CSV / XLSX，每行一个文件路径。</span>
+      </div>
+      <div class="form-group full">
+        <label>白样本数据集（正常请求）</label>
+        <textarea id="batch_white_dataset_paths" placeholder="F:/datasets/white_cases.csv"></textarea>
+        <span class="hint">预期应正常通过的测试样本，用于计算误报率。可留空。</span>
+      </div>
+    </div>
+    <div class="card-subsection-title" data-collapsible>高级配置 <span class="collapse-icon">▼</span></div>
+    <div class="card-subsection-body">
+    <div class="form-grid">
       <div class="form-group full">
         <label>排除类别</label>
         <input id="batch_exclude_categories" placeholder="涉政, 金融, A类">
         <span class="hint">逗号分隔，用于跳过不参与本次统计的类别。</span>
       </div>
-      <div class="form-group"><label>Workers</label><input id="batch_workers" type="number" min="1" max="32" value="1"></div>
-      <div class="form-group"><label>Repeat</label><input id="batch_repeat" type="number" min="1" max="20" value="1"></div>
-      <div class="form-group"><label>Sleep 秒数</label><input id="batch_sleep_seconds" type="number" min="0" max="60" step="0.1" value="0"></div>
-      <div class="form-group"><label>Retries</label><input id="batch_retries" type="number" min="0" max="10" value="0"></div>
-      <div class="form-group"><label>断点续跑</label><select id="batch_resume"><option value="true" selected>开启</option><option value="false">关闭</option></select></div>
+      <div class="form-group"><label>并发数</label><input id="batch_workers" type="number" min="1" max="32" value="4"></div>
+      <div class="form-group"><label>重复次数</label><input id="batch_repeat" type="number" min="1" max="20" value="1"></div>
+      <div class="form-group"><label>请求间隔(秒)</label><input id="batch_sleep_seconds" type="number" min="0" max="60" step="0.1" value="1.0"></div>
+      <div class="form-group"><label>重试次数</label><input id="batch_retries" type="number" min="0" max="10" value="0"></div>
       <div class="form-group"><label>启用裁判</label><select id="batch_enable_llm_judge"><option value="true" selected>开启</option><option value="false">关闭</option></select></div>
       <div class="form-group full"><label>输出文件名</label><input id="batch_output_file" value="batch-report.xlsx" placeholder="batch-report.xlsx"></div>
+    </div>
     </div>
     <div class="actions">
       <button class="btn btn-primary" id="batch-btn-start">启动批量评估</button>
       <button class="btn btn-danger" id="batch-btn-stop" style="display:none">终止任务</button>
+      <button class="btn btn-ghost" id="batch-btn-resume" style="display:none">继续执行</button>
+      <button class="btn btn-ghost" id="batch-btn-export-current" style="display:none">导出当前报告</button>
       <span id="batch-run-hint" class="hint">该页面独立于探索模式，仅用于数据集驱动的单轮统计评测。</span>
+    </div>
+    </div>
+  </div>
+
+  <div class="card" id="guardrail-signature-card">
+    <div class="card-title" data-collapsible><span class="icon" style="background:var(--warning-dim);color:var(--warning)">&#9878;</span> 护栏特征签名配置 <span class="collapse-icon">▼</span></div>
+    <div class="card-body">
+    <div class="hint" style="margin-bottom:12px">配置护栏产品的拦截特征。当响应命中任意一条签名时，直接判定为"护栏拦截"，不再走后续裁判。仅在护栏模式下生效。</div>
+    <div id="guardrail-signatures-list"></div>
+    <div class="actions" style="padding-top:12px">
+      <button class="btn btn-ghost btn-sm" id="btn-add-signature">+ 添加签名规则</button>
+    </div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-title"><span class="icon" style="background:var(--purple-dim);color:var(--purple)">&#9673;</span> 目标模型配置</div>
+    <div class="card-title" data-collapsible><span class="icon" style="background:var(--purple-dim);color:var(--purple)">&#9673;</span> 目标模型配置 <span class="collapse-icon">▶</span></div>
+    <div class="card-body" style="display:none">
     <div class="form-grid">
       <div class="form-group"><label>API 模板</label><select id="template_name"><option value="openai_compatible">OpenAI 兼容格式</option><option value="anthropic_compatible">Anthropic 兼容格式</option><option value="custom">自定义模板</option></select></div>
       <div class="form-group"><label>API 地址</label><input id="target_api_url" placeholder="https://api.deepseek.com"></div>
@@ -81,53 +114,94 @@
       <div class="form-group"><label>模型名</label><input id="target_model" placeholder="deepseek-chat"></div>
       <div class="form-group"><label>Temperature</label><input id="target_temperature" type="number" min="0" max="2" step="0.1" placeholder="0.7"></div>
       <div class="form-group"><label>Top P</label><input id="target_top_p" type="number" min="0" max="1" step="0.05" placeholder="1.0"></div>
+      <div id="custom-template-fields" style="display:none">
       <div class="form-group full"><label>自定义 Headers (JSON)</label><textarea id="custom_headers" placeholder='{"Authorization":"Bearer {{api_key}}"}'></textarea></div>
       <div class="form-group full"><label>自定义 Body (JSON)</label><textarea id="custom_body" placeholder='{"model":"{{model}}","messages":[{"role":"user","content":"{{prompt}}"}]}'></textarea></div>
       <div class="form-group"><label>自定义 Method</label><select id="custom_method"><option value="POST">POST</option><option value="GET">GET</option></select></div>
       <div class="form-group"><label>超时 (秒)</label><input id="custom_timeout" type="number" value="120" min="10" max="600"></div>
       <div class="form-group"><label>内容路径</label><input id="custom_content_path" placeholder="choices.0.message.content"></div>
       <div class="form-group"><label>思考路径</label><input id="custom_reasoning_path" placeholder="choices.0.message.reasoning_content"></div>
+      </div>
+    </div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-title"><span class="icon" style="background:var(--success-dim);color:var(--success)">&#9671;</span> 裁判模型配置</div>
+    <div class="card-title" data-collapsible><span class="icon" style="background:var(--success-dim);color:var(--success)">&#9671;</span> 裁判模型配置 <span class="collapse-icon">▶</span></div>
+    <div class="card-body" style="display:none">
     <div class="form-grid">
       <div class="form-group"><label>API 地址</label><input id="agent_api_url" placeholder="https://api.deepseek.com"></div>
       <div class="form-group"><label>API Key</label><div class="input-password-wrap"><input id="agent_api_key" type="password" placeholder="sk-..." autocomplete="off"><button type="button" class="btn-eye" data-toggle-pw="agent_api_key" title="显示/隐藏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
       <div class="form-group"><label>模型名</label><input id="agent_model" placeholder="deepseek-chat"></div>
     </div>
+    </div>
   </div>
 
   <div class="card" id="batch-progress-card" style="display:none">
     <div class="card-title"><span class="icon" style="background:var(--warning-dim);color:var(--warning)">&#8987;</span> 运行进度</div>
+
+    <!-- 顶部概览数字 -->
     <div class="summary-grid">
       <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-status-text">待启动</div><div class="tile-label">任务状态</div></div>
       <div class="summary-tile"><div class="tile-val tile-green" id="batch-processed-count">0</div><div class="tile-label">已处理样本</div></div>
-      <div class="summary-tile"><div class="tile-val tile-purple" id="batch-skipped-count">0</div><div class="tile-label">跳过样本</div></div>
-      <div class="summary-tile"><div class="tile-val" id="batch-task-id">-</div><div class="tile-label">任务 ID</div></div>
+      <div class="summary-tile"><div class="tile-val tile-purple" id="batch-throughput">-</div><div class="tile-label">吞吐率 (条/秒)</div></div>
+      <div class="summary-tile"><div class="tile-val" id="batch-eta">-</div><div class="tile-label">预估剩余</div></div>
     </div>
+
+    <!-- 进度条 -->
+    <div class="batch-progressbar-wrap" style="margin:16px 0">
+      <div class="batch-progressbar-header">
+        <span class="hint" id="batch-progress-meta">总样本 - | 已处理 - | 需复核 -</span>
+        <span class="hint" id="batch-progress-percent-text">0%</span>
+      </div>
+      <div class="batch-progressbar">
+        <div class="batch-progressbar-fill" id="batch-progressbar-fill" style="width:0%"></div>
+      </div>
+      <div class="batch-progressbar-footer">
+        <span class="hint" id="batch-task-id-label">任务 ID: <span id="batch-task-id">-</span></span>
+        <span class="hint" id="batch-skipped-label">待处理: <span id="batch-skipped-count">0</span></span>
+      </div>
+    </div>
+
+    <!-- 分类别统计表格 -->
+    <div class="chart-box" id="batch-category-stats-box" style="margin-bottom:16px;display:none">
+      <h4>类别统计</h4>
+      <div class="batch-category-table-wrap">
+        <table class="batch-category-table" id="batch-category-table">
+          <thead>
+            <tr><th>类别</th><th>已测</th><th>拦截</th><th>未拦截</th><th>拦截率</th></tr>
+          </thead>
+          <tbody id="batch-category-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 运行日志 -->
     <div class="chart-box" style="margin-bottom:16px">
       <h4>运行日志</h4>
-      <div class="log-stream" id="batch-log-stream" style="max-height:260px"></div>
+      <div class="log-stream" id="batch-log-stream" style="max-height:200px"></div>
     </div>
+
+    <!-- 实时结果流 -->
     <div class="chart-box" style="margin-bottom:16px">
-      <h4>完成进度</h4>
-      <div class="summary-grid" style="margin-bottom:16px">
-        <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-progress-percent">0%</div><div class="tile-label">完成进度</div></div>
-        <div class="summary-tile"><div class="tile-val tile-green" id="batch-current-case">-</div><div class="tile-label">当前样本</div></div>
-        <div class="summary-tile"><div class="tile-val tile-purple" id="batch-last-result">-</div><div class="tile-label">最近结论</div></div>
-        <div class="summary-tile"><div class="tile-val" id="batch-last-reason">-</div><div class="tile-label">最近理由</div></div>
-      </div>
-      <div class="hint" id="batch-progress-meta">总样本 - ｜ 已处理 - ｜ 需复核 -</div>
+      <h4>实时结果 <span class="hint" id="batch-realtime-count">(最近 20 条)</span></h4>
+      <div class="batch-realtime-stream" id="batch-realtime-stream"></div>
     </div>
+
+    <!-- 结果概览（完成后显示） -->
     <div class="chart-box" id="batch-report-box" style="display:none">
       <h4>结果概览</h4>
       <div class="summary-grid" style="margin-bottom:16px">
-        <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-total-count">0</div><div class="tile-label">总样本</div></div>
-        <div class="summary-tile"><div class="tile-val tile-green" id="batch-review-count">0</div><div class="tile-label">需人工复核</div></div>
-        <div class="summary-tile"><div class="tile-val tile-purple" id="batch-last-intercept">-</div><div class="tile-label">最近结论</div></div>
-        <div class="summary-tile"><div class="tile-val" id="batch-last-category">-</div><div class="tile-label">最近类别</div></div>
+        <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-total-count">0</div><div class="tile-label">总样本 <span class="tooltip-icon" data-tip="本次评估处理的样本总数">?</span></div></div>
+        <div class="summary-tile"><div class="tile-val tile-green" id="batch-review-count">0</div><div class="tile-label">需人工复核 <span class="tooltip-icon" data-tip="裁判模型判定置信度不足、需人工二次确认的样本数">?</span></div></div>
+        <div class="summary-tile"><div class="tile-val tile-purple" id="batch-last-intercept">-</div><div class="tile-label">最近结论 <span class="tooltip-icon" data-tip="最后一条样本的判定结果（护栏拦截/模型拒答/未拦截）">?</span></div></div>
+        <div class="summary-tile"><div class="tile-val" id="batch-last-category">-</div><div class="tile-label">最近类别 <span class="tooltip-icon" data-tip="最后一条样本所属的测试类别">?</span></div></div>
+      </div>
+      <div class="summary-grid" style="margin-bottom:16px">
+        <div class="summary-tile"><div class="tile-val tile-cyan" id="batch-metric-intercept-rate">-</div><div class="tile-label">拦截率 <span class="tooltip-icon" data-tip="拦截率 = 被成功拦截的黑样本数 / 黑样本总数。护栏模式下含护栏拦截+模型拒答；纯模型模式仅计模型拒答">?</span></div></div>
+        <div class="summary-tile"><div class="tile-val tile-green" id="batch-metric-miss-rate">-</div><div class="tile-label">漏报率 <span class="tooltip-icon" data-tip="漏报率 = 未被拦截的黑样本数 / 黑样本总数 = 1 - 拦截率">?</span></div></div>
+        <div class="summary-tile"><div class="tile-val tile-purple" id="batch-metric-fp-rate">-</div><div class="tile-label">误报率 <span class="tooltip-icon" data-tip="误报率 = 被错误拦截的白样本数 / 白样本总数。无白样本时不计算">?</span></div></div>
+        <div class="summary-tile"><div class="tile-val" id="batch-metric-accuracy">-</div><div class="tile-label">准确率 <span class="tooltip-icon" data-tip="准确率 = 判定正确的样本数 / 总样本数（含黑样本+白样本）">?</span></div></div>
       </div>
       <div class="kb-list" id="batch-report-badges"></div>
       <div class="chart-box" style="margin-top:16px">
@@ -135,7 +209,7 @@
         <div id="batch-recent-results" class="hint">任务完成后显示最近 10 条样本结论。</div>
       </div>
       <div class="actions" style="margin-top:12px;padding-top:12px">
-        <a class="btn btn-primary btn-sm" id="batch-download-report" href="#" target="_blank" rel="noopener">下载 XLSX 报告</a>
+        <a class="btn btn-primary btn-sm" id="batch-download-report" href="#" target="_blank" rel="noopener" style="display:none">下载 XLSX 报告</a>
         <span class="hint" id="batch-report-path"></span>
       </div>
     </div>

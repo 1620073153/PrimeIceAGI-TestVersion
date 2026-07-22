@@ -10,7 +10,7 @@ from engine.prompt_generator import AGENT_HOME, get_generator_status
 
 health_bp = Blueprint("health", __name__)
 
-AGENT_SETTINGS_PATH = os.path.join(AGENT_HOME, ".claude", "settings.json")
+GENERATOR_SETTINGS_PATH = os.path.join(AGENT_HOME, ".claude", "settings.json")
 
 
 @health_bp.route("/api/health")
@@ -42,7 +42,11 @@ def probe_target():
         preset = PRESET_TEMPLATES.get(template_name, PRESET_TEMPLATES["openai_compatible"])
         method = preset["method"]
         headers = dict(preset["headers"])
-        body = dict(preset["body"])
+        # probe 使用最小 body：只保留 model + messages，不带可选参数
+        body = {
+            "model": "{{model}}",
+            "messages": [{"role": "user", "content": "{{prompt}}"}],
+        }
         ep = preset.get("endpoint", "")
         if ep and not api_url.endswith(ep):
             api_url = api_url + ep
@@ -55,10 +59,6 @@ def probe_target():
         body_str = body_str.replace("{{model}}", model)
         body_str = body_str.replace("{{prompt}}", "Hello, this is a connectivity test.")
         body = json.loads(body_str)
-        if "temperature" in data:
-            body["temperature"] = data["temperature"]
-        if "top_p" in data:
-            body["top_p"] = data["top_p"]
 
     try:
         if method.upper() == "GET":
@@ -87,12 +87,11 @@ def probe_target():
 
 
 @health_bp.route("/api/generator/config", methods=["GET"])
-@health_bp.route("/api/claude-agent/config", methods=["GET"])
 def get_generator_config():
     """读取提示词生成配置"""
     status = get_generator_status()
     try:
-        with open(AGENT_SETTINGS_PATH, "r", encoding="utf-8") as f:
+        with open(GENERATOR_SETTINGS_PATH, "r", encoding="utf-8") as f:
             settings = json.load(f)
         env = settings.get("env", {}) if isinstance(settings, dict) else {}
         return jsonify({
@@ -109,7 +108,6 @@ def get_generator_config():
 
 
 @health_bp.route("/api/generator/config", methods=["POST"])
-@health_bp.route("/api/claude-agent/config", methods=["POST"])
 def save_generator_config():
     """保存提示词生成配置"""
     data = request.get_json(force=True)
@@ -126,8 +124,8 @@ def save_generator_config():
         "ANTHROPIC_MODEL": model,
     }, "permissions": {"allow": []}}
 
-    os.makedirs(os.path.dirname(AGENT_SETTINGS_PATH), exist_ok=True)
-    with open(AGENT_SETTINGS_PATH, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(GENERATOR_SETTINGS_PATH), exist_ok=True)
+    with open(GENERATOR_SETTINGS_PATH, "w", encoding="utf-8") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
 
     return jsonify({"ok": True, "message": "已保存"})

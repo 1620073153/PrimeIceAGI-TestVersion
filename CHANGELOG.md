@@ -1,5 +1,28 @@
 # PrimeIceAGI 变更记录
 
+## v0.5.8 (2026-07-22)
+
+- **fix**: 补提交批量评估模块完整代码（原 v0.5.0/v0.5.1 遗漏，未入 git）
+  - `engine/batch_evaluator.py` — 批量评估引擎
+  - `engine/batch_models.py` — 批量数据模型
+  - `engine/batch_statistics.py` — 批量统计模块（新增）
+  - `engine/intercept_classifier.py` — 拦截分类器
+  - `engine/report_exporter.py` — 报告导出器
+  - `backend/services/batch_eval_service.py` — 批量评估服务
+  - `backend/routes/batch_eval.py` — 批量评估路由
+  - `backend/routes/health.py` — 健康检查
+  - `backend/services/test_service.py` — 测试服务
+  - `backend/task_manager.py` — 任务管理器
+  - `data/batch_progress_store.py` — 进度存储
+  - `data/dataset_loader.py` — 数据集加载器
+  - `kb_data/kb5.json` — KB5 知识库数据
+  - `static/js/batch.js` — 批量评估前端
+  - `static/css/main.css` — 样式更新
+  - `templates/batch.html` — 批量评估页面模板
+  - `tests/test_generator_preflight.py` — 生成器前置校验测试（新增）
+  - `tests/test_prompt_generator.py` — 提示词生成器测试（新增）
+  - 删除过时测试：`test_claude_agent.py`、`test_claude_preflight.py`
+
 ## v0.5.7 (2026-07-22)
 
 - **fix**: LLMClient 添加 Chrome User-Agent，修复企业 WAF（nginx）403 导致提示词生成器和裁判调用失败的问题
